@@ -9,7 +9,7 @@ import { getPins, getWork, getWorkPassages } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const slug = decodeParam((await params).slug);
-  const work = getWork(slug);
+  const work = await getWork(slug);
   if (!work) return { title: "作品が見つかりません" };
   return {
     title: `${work.title}（${work.author}）の舞台地図`,
@@ -19,12 +19,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function WorkPage({ params }: { params: Promise<{ slug: string }> }) {
   const slug = decodeParam((await params).slug);
-  const work = getWork(slug);
+  const work = await getWork(slug);
   if (!work) notFound();
 
   const user = await currentUser();
-  const passages = getWorkPassages(work.id, user?.id);
-  const pins = getPins({ workId: work.id });
+  const passages = await getWorkPassages(work.id, user?.id);
+  const pins = await getPins({ workId: work.id });
 
   const mapPins: MapPin[] = pins.map((p) => ({
     id: p.identification_id,

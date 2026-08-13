@@ -6,7 +6,7 @@ import { getPlace, getRevisions, type Revision } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const place = getPlace(Number(id));
+  const place = await getPlace(Number(id));
   return { title: place ? `${place.name}の編集履歴` : "編集履歴" };
 }
 
@@ -32,10 +32,10 @@ export default async function HistoryPage({ params }: { params: Promise<{ id: st
   const placeId = Number(id);
   if (!Number.isInteger(placeId)) notFound();
 
-  const place = getPlace(placeId);
+  const place = await getPlace(placeId);
   if (!place) notFound();
 
-  const rows: HistoryRow[] = getRevisions(placeId).map((r) => ({
+  const rows: HistoryRow[] = (await getRevisions(placeId)).map((r) => ({
     id: r.id,
     editorHandle: r.editor_handle,
     editorName: r.editor_name,

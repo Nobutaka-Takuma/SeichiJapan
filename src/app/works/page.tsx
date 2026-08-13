@@ -16,7 +16,7 @@ export default async function WorksPage({
   searchParams: Promise<{ q?: string; medium?: string }>;
 }) {
   const { q = "", medium = "all" } = await searchParams;
-  const works = listWorks(q, medium);
+  const works = await listWorks(q, medium);
 
   return (
     <div className="space-y-6">

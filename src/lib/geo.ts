@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { query } from "./db";
 
 /**
  * 地名から地図の行き先を引く。
@@ -81,13 +81,10 @@ function municipality(address: string): string | null {
 type Area = { key: string; muni: string; pref: string; lats: number[]; lngs: number[] };
 
 /** 登録済みの場所の住所から、市区町村ごとのまとまりを作る。 */
-function areaIndex(): Area[] {
-  const rows = db.prepare("SELECT lat, lng, prefecture, address FROM places").all() as {
-    lat: number;
-    lng: number;
-    prefecture: string;
-    address: string;
-  }[];
+async function areaIndex(): Promise<Area[]> {
+  const rows = await query<{ lat: number; lng: number; prefecture: string; address: string }>(
+    "SELECT lat, lng, prefecture, address FROM places",
+  );
 
   const map = new Map<string, Area>();
   for (const r of rows) {
@@ -190,14 +187,14 @@ async function searchExternal(q: string): Promise<GeoHit[]> {
   }
 }
 
-export async function searchGeo(query: string, limit = 8): Promise<GeoHit[]> {
-  const q = query.trim();
+export async function searchGeo(term: string, limit = 8): Promise<GeoHit[]> {
+  const q = term.trim();
   if (!q) return [];
 
   const hits: GeoHit[] = [];
 
   // 1. 市区町村（手元のデータから作った索引）
-  for (const a of areaIndex()) {
+  for (const a of await areaIndex()) {
     if (a.muni.includes(q) || a.key.includes(q)) hits.push(areaHit(a));
   }
   hits.sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
@@ -210,21 +207,20 @@ export async function searchGeo(query: string, limit = 8): Promise<GeoHit[]> {
   }
 
   // 3. 登録済みの場所そのもの
-  const places = db
-    .prepare(
-      `SELECT id, name, lat, lng, prefecture, address FROM places
-        WHERE name LIKE @q OR address LIKE @q OR prefecture LIKE @q
-        ORDER BY (SELECT COUNT(*) FROM place_likes l WHERE l.place_id = places.id) DESC
-        LIMIT 6`,
-    )
-    .all({ q: `%${q}%` }) as {
+  const places = await query<{
     id: number;
     name: string;
     lat: number;
     lng: number;
     prefecture: string;
     address: string;
-  }[];
+  }>(
+    `SELECT id, name, lat, lng, prefecture, address FROM places
+      WHERE name ILIKE $1 OR address ILIKE $1 OR prefecture ILIKE $1
+      ORDER BY (SELECT COUNT(*) FROM place_likes l WHERE l.place_id = places.id) DESC
+      LIMIT 6`,
+    [`%${q}%`],
+  );
 
   for (const p of places) {
     hits.push({

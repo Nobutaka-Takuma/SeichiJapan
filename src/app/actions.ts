@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db } from "@/lib/db";
+import { one, query, tx, type Executor } from "@/lib/db";
+import { ensureDatabaseReady } from "@/lib/data";
 import { currentUser, login, logout, register } from "@/lib/auth";
 import { UploadError, saveImage } from "@/lib/uploads";
 
@@ -62,14 +63,18 @@ export async function toggleLikeAction(placeId: number): Promise<FormState & { l
   const user = await currentUser();
   if (!user) return { error: "いいねするにはログインが必要です" };
 
-  const existing = db
-    .prepare("SELECT 1 FROM place_likes WHERE place_id = ? AND user_id = ?")
-    .get(placeId, user.id);
+  const existing = await one("SELECT 1 FROM place_likes WHERE place_id = $1 AND user_id = $2", [
+    placeId,
+    user.id,
+  ]);
 
   if (existing) {
-    db.prepare("DELETE FROM place_likes WHERE place_id = ? AND user_id = ?").run(placeId, user.id);
+    await query("DELETE FROM place_likes WHERE place_id = $1 AND user_id = $2", [placeId, user.id]);
   } else {
-    db.prepare("INSERT OR IGNORE INTO place_likes (place_id, user_id) VALUES (?, ?)").run(placeId, user.id);
+    await query("INSERT INTO place_likes (place_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
+      placeId,
+      user.id,
+    ]);
   }
 
   revalidatePath(`/places/${placeId}`);
@@ -78,26 +83,38 @@ export async function toggleLikeAction(placeId: number): Promise<FormState & { l
   return { ok: "更新しました", liked: !existing };
 }
 
-/* ---------- 場所の記事の共同編集 ---------- */
+/* ---------- 版の記録 ---------- */
 
 /** 現在の内容を版として記録する。編集のたびに「編集後の状態」を1件積む。 */
-function snapshot(placeId: number, editorId: number | null, summary: string) {
-  db.prepare(
+const snapshotPlace = (x: Executor, placeId: number, editorId: number | null, summary: string) =>
+  x.query(
     `INSERT INTO place_revisions
        (place_id, editor_id, name, lat, lng, prefecture, address, note, body, access, photo_path, summary)
-     SELECT id, @editor, name, lat, lng, prefecture, address, note, body, access, photo_path, @summary
-       FROM places WHERE id = @place`,
-  ).run({ place: placeId, editor: editorId, summary });
-}
+     SELECT id, $1, name, lat, lng, prefecture, address, note, body, access, photo_path, $2
+       FROM places WHERE id = $3`,
+    [editorId, summary, placeId],
+  );
+
+const snapshotPassage = (x: Executor, passageId: number, editorId: number | null, summary: string) =>
+  x.query(
+    `INSERT INTO passage_revisions
+       (passage_id, editor_id, chapter, kind, quote, note, image_path, image_caption, image_credit, summary)
+     SELECT id, $1, chapter, kind, quote, note, image_path, image_caption, image_credit, $2
+       FROM passages WHERE id = $3`,
+    [editorId, summary, passageId],
+  );
+
+/* ---------- 場所の記事の共同編集 ---------- */
 
 export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await currentUser();
   if (!user) return { error: "編集するにはログインが必要です" };
 
   const placeId = Number(fd.get("place_id"));
-  const current = db.prepare("SELECT id, photo_path FROM places WHERE id = ?").get(placeId) as
-    | { id: number; photo_path: string }
-    | undefined;
+  const current = await one<{ id: number; photo_path: string }>(
+    "SELECT id, photo_path FROM places WHERE id = $1",
+    [placeId],
+  );
   if (!current) return { error: "場所が見つかりません" };
 
   const name = str(fd, "name");
@@ -115,27 +132,29 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
     const uploaded = await saveImage(fd.get("photo"));
     if (uploaded) photo = uploaded;
 
-    db.prepare(
-      `UPDATE places
-          SET name = @name, lat = @lat, lng = @lng, prefecture = @prefecture, address = @address,
-              note = @note, body = @body, access = @access, photo_path = @photo,
-              updated_at = datetime('now'), updated_by = @user
-        WHERE id = @id`,
-    ).run({
-      id: placeId,
-      name,
-      lat,
-      lng,
-      prefecture: str(fd, "prefecture"),
-      address: str(fd, "address"),
-      note: str(fd, "note"),
-      body: str(fd, "body"),
-      access: str(fd, "access"),
-      photo,
-      user: user.id,
+    await tx(async (x) => {
+      await x.query(
+        `UPDATE places
+            SET name = $1, lat = $2, lng = $3, prefecture = $4, address = $5,
+                note = $6, body = $7, access = $8, photo_path = $9,
+                updated_at = now(), updated_by = $10
+          WHERE id = $11`,
+        [
+          name,
+          lat,
+          lng,
+          str(fd, "prefecture"),
+          str(fd, "address"),
+          str(fd, "note"),
+          str(fd, "body"),
+          str(fd, "access"),
+          photo,
+          user.id,
+          placeId,
+        ],
+      );
+      await snapshotPlace(x, placeId, user.id, str(fd, "summary"));
     });
-
-    snapshot(placeId, user.id, str(fd, "summary"));
   } catch (e) {
     if (e instanceof UploadError) return { error: e.message };
     return fail(e);
@@ -152,32 +171,45 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
   const user = await currentUser();
   if (!user) return { error: "差し戻すにはログインが必要です" };
 
-  const rev = db.prepare("SELECT * FROM place_revisions WHERE id = ?").get(revisionId) as
-    | {
-        id: number;
-        place_id: number;
-        name: string;
-        lat: number;
-        lng: number;
-        prefecture: string;
-        address: string;
-        note: string;
-        body: string;
-        access: string;
-        photo_path: string;
-      }
-    | undefined;
+  const rev = await one<{
+    id: number;
+    place_id: number;
+    name: string;
+    lat: number;
+    lng: number;
+    prefecture: string;
+    address: string;
+    note: string;
+    body: string;
+    access: string;
+    photo_path: string;
+  }>("SELECT * FROM place_revisions WHERE id = $1", [revisionId]);
   if (!rev) return { error: "指定された版が見つかりません" };
 
   try {
-    db.prepare(
-      `UPDATE places
-          SET name = @name, lat = @lat, lng = @lng, prefecture = @prefecture, address = @address,
-              note = @note, body = @body, access = @access, photo_path = @photo_path,
-              updated_at = datetime('now'), updated_by = @user
-        WHERE id = @id`,
-    ).run({ ...rev, id: rev.place_id, user: user.id });
-    snapshot(rev.place_id, user.id, `#${rev.id} の版へ差し戻し`);
+    await tx(async (x) => {
+      await x.query(
+        `UPDATE places
+            SET name = $1, lat = $2, lng = $3, prefecture = $4, address = $5,
+                note = $6, body = $7, access = $8, photo_path = $9,
+                updated_at = now(), updated_by = $10
+          WHERE id = $11`,
+        [
+          rev.name,
+          rev.lat,
+          rev.lng,
+          rev.prefecture,
+          rev.address,
+          rev.note,
+          rev.body,
+          rev.access,
+          rev.photo_path,
+          user.id,
+          rev.place_id,
+        ],
+      );
+      await snapshotPlace(x, rev.place_id, user.id, `#${rev.id} の版へ差し戻し`);
+    });
   } catch (e) {
     return fail(e);
   }
@@ -189,23 +221,15 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
 
 /* ---------- シーンの共同編集 ---------- */
 
-function snapshotPassage(passageId: number, editorId: number | null, summary: string) {
-  db.prepare(
-    `INSERT INTO passage_revisions
-       (passage_id, editor_id, chapter, kind, quote, note, image_path, image_caption, image_credit, summary)
-     SELECT id, @editor, chapter, kind, quote, note, image_path, image_caption, image_credit, @summary
-       FROM passages WHERE id = @passage`,
-  ).run({ passage: passageId, editor: editorId, summary });
-}
-
 export async function editPassageAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await currentUser();
   if (!user) return { error: "編集するにはログインが必要です" };
 
   const passageId = Number(fd.get("passage_id"));
-  const current = db.prepare("SELECT id, image_path, work_id FROM passages WHERE id = ?").get(passageId) as
-    | { id: number; image_path: string; work_id: number }
-    | undefined;
+  const current = await one<{ id: number; image_path: string }>(
+    "SELECT id, image_path FROM passages WHERE id = $1",
+    [passageId],
+  );
   if (!current) return { error: "シーンが見つかりません" };
 
   const quote = str(fd, "quote");
@@ -217,25 +241,27 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
     const uploaded = await saveImage(fd.get("image"));
     if (uploaded) image = uploaded;
 
-    db.prepare(
-      `UPDATE passages
-          SET chapter = @chapter, kind = @kind, quote = @quote, note = @note,
-              image_path = @image, image_caption = @caption, image_credit = @credit,
-              updated_at = datetime('now'), updated_by = @user
-        WHERE id = @id`,
-    ).run({
-      id: passageId,
-      chapter: str(fd, "chapter"),
-      kind: str(fd, "kind") || "scene",
-      quote,
-      note: str(fd, "note"),
-      image,
-      caption: str(fd, "image_caption"),
-      credit: str(fd, "image_credit"),
-      user: user.id,
+    await tx(async (x) => {
+      await x.query(
+        `UPDATE passages
+            SET chapter = $1, kind = $2, quote = $3, note = $4,
+                image_path = $5, image_caption = $6, image_credit = $7,
+                updated_at = now(), updated_by = $8
+          WHERE id = $9`,
+        [
+          str(fd, "chapter"),
+          str(fd, "kind") || "scene",
+          quote,
+          str(fd, "note"),
+          image,
+          str(fd, "image_caption"),
+          str(fd, "image_credit"),
+          user.id,
+          passageId,
+        ],
+      );
+      await snapshotPassage(x, passageId, user.id, str(fd, "summary"));
     });
-
-    snapshotPassage(passageId, user.id, str(fd, "summary"));
   } catch (e) {
     if (e instanceof UploadError) return { error: e.message };
     return fail(e);
@@ -250,30 +276,41 @@ export async function revertPassageAction(revisionId: number): Promise<FormState
   const user = await currentUser();
   if (!user) return { error: "差し戻すにはログインが必要です" };
 
-  const rev = db.prepare("SELECT * FROM passage_revisions WHERE id = ?").get(revisionId) as
-    | {
-        id: number;
-        passage_id: number;
-        chapter: string;
-        kind: string;
-        quote: string;
-        note: string;
-        image_path: string;
-        image_caption: string;
-        image_credit: string;
-      }
-    | undefined;
+  const rev = await one<{
+    id: number;
+    passage_id: number;
+    chapter: string;
+    kind: string;
+    quote: string;
+    note: string;
+    image_path: string;
+    image_caption: string;
+    image_credit: string;
+  }>("SELECT * FROM passage_revisions WHERE id = $1", [revisionId]);
   if (!rev) return { error: "指定された版が見つかりません" };
 
   try {
-    db.prepare(
-      `UPDATE passages
-          SET chapter = @chapter, kind = @kind, quote = @quote, note = @note,
-              image_path = @image_path, image_caption = @image_caption, image_credit = @image_credit,
-              updated_at = datetime('now'), updated_by = @user
-        WHERE id = @id`,
-    ).run({ ...rev, id: rev.passage_id, user: user.id });
-    snapshotPassage(rev.passage_id, user.id, `#${rev.id} の版へ差し戻し`);
+    await tx(async (x) => {
+      await x.query(
+        `UPDATE passages
+            SET chapter = $1, kind = $2, quote = $3, note = $4,
+                image_path = $5, image_caption = $6, image_credit = $7,
+                updated_at = now(), updated_by = $8
+          WHERE id = $9`,
+        [
+          rev.chapter,
+          rev.kind,
+          rev.quote,
+          rev.note,
+          rev.image_path,
+          rev.image_caption,
+          rev.image_credit,
+          user.id,
+          rev.passage_id,
+        ],
+      );
+      await snapshotPassage(x, rev.passage_id, user.id, `#${rev.id} の版へ差し戻し`);
+    });
   } catch (e) {
     return fail(e);
   }
@@ -285,17 +322,38 @@ export async function revertPassageAction(revisionId: number): Promise<FormState
 
 /* ---------- 地図・場所からのシーン投稿 ---------- */
 
+function makeSlugBase(input: string, title: string): string {
+  return (
+    input.replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "") ||
+    title.replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "") ||
+    "work"
+  );
+}
+
+async function uniqueSlug(x: Executor, base: string): Promise<string> {
+  let slug = base;
+  let n = 2;
+  while ((await x.query("SELECT 1 FROM works WHERE slug = $1", [slug])).length > 0) {
+    slug = `${base}-${n++}`;
+  }
+  return slug;
+}
+
 /**
  * フォームで選ばれた作品を返す。一覧になければ、その場で作品を作る。
  * 作品数が増えるほど「先に作品を登録してから出直す」導線は負担になるため。
  */
-function resolveWork(fd: FormData, userId: number): { id: number; slug: string } | { error: string } {
+async function resolveWork(
+  x: Executor,
+  fd: FormData,
+  userId: number,
+): Promise<{ id: number; slug: string } | { error: string }> {
   const workId = Number(fd.get("work_id")) || 0;
   if (workId) {
-    const work = db.prepare("SELECT id, slug FROM works WHERE id = ?").get(workId) as
-      | { id: number; slug: string }
-      | undefined;
-    return work ?? { error: "選ばれた作品が見つかりません" };
+    const rows = await x.query<{ id: number; slug: string }>("SELECT id, slug FROM works WHERE id = $1", [
+      workId,
+    ]);
+    return rows[0] ?? { error: "選ばれた作品が見つかりません" };
   }
 
   const title = str(fd, "new_work_title");
@@ -303,21 +361,18 @@ function resolveWork(fd: FormData, userId: number): { id: number; slug: string }
   const author = str(fd, "new_work_author");
   if (!author) return { error: "新しい作品を登録するには、作者・制作も入力してください" };
 
-  const existing = db.prepare("SELECT id, slug FROM works WHERE title = ? AND author = ?").get(title, author) as
-    | { id: number; slug: string }
-    | undefined;
-  if (existing) return existing;
-
-  const slug = makeSlug("", title);
-  db.prepare("INSERT INTO works (slug, title, author, medium, created_by) VALUES (?, ?, ?, ?, ?)").run(
-    slug,
-    title,
-    author,
-    str(fd, "new_work_medium") || "anime",
-    userId,
+  const existing = await x.query<{ id: number; slug: string }>(
+    "SELECT id, slug FROM works WHERE title = $1 AND author = $2",
+    [title, author],
   );
-  const created = db.prepare("SELECT id, slug FROM works WHERE slug = ?").get(slug) as { id: number; slug: string };
-  return created;
+  if (existing[0]) return existing[0];
+
+  const slug = await uniqueSlug(x, makeSlugBase("", title));
+  const rows = await x.query<{ id: number; slug: string }>(
+    "INSERT INTO works (slug, title, author, medium, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id, slug",
+    [slug, title, author, str(fd, "new_work_medium") || "anime", userId],
+  );
+  return rows[0];
 }
 
 /**
@@ -327,80 +382,94 @@ function resolveWork(fd: FormData, userId: number): { id: number; slug: string }
 export async function addSceneAction(_prev: FormState, fd: FormData): Promise<FormState & { placeId?: number }> {
   const user = await currentUser();
   if (!user) return { error: "投稿するにはログインが必要です" };
+  await ensureDatabaseReady();
 
   const quote = str(fd, "quote");
   if (quote.length < 5) return { error: "シーンの説明を5文字以上で書いてください" };
 
-  let placeId = Number(fd.get("place_id")) || 0;
-  let workSlug = "";
-
+  let image: string | null = null;
   try {
-    const resolved = resolveWork(fd, user.id);
-    if ("error" in resolved) return { error: resolved.error };
-    const work = resolved;
-    workSlug = work.slug;
-
-    if (!placeId) {
-      const name = str(fd, "place_name");
-      const lat = Number(fd.get("lat"));
-      const lng = Number(fd.get("lng"));
-      if (!name) return { error: "場所の名前を入力してください" };
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return { error: "地図をクリックして場所を指定してください" };
-      }
-      placeId = db
-        .prepare(
-          `INSERT INTO places (name, lat, lng, prefecture, address, note, created_by, updated_at, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
-        )
-        .run(name, lat, lng, str(fd, "prefecture"), str(fd, "address"), str(fd, "place_note"), user.id, user.id)
-        .lastInsertRowid as number;
-      snapshot(placeId, user.id, "新規作成");
-    }
-
-    const image = await saveImage(fd.get("image"));
-
-    const order = (
-      db.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM passages WHERE work_id = ?").get(work.id) as {
-        n: number;
-      }
-    ).n;
-
-    const passageId = db
-      .prepare(
-        `INSERT INTO passages
-           (work_id, chapter, kind, quote, note, sort_order, created_by, image_path, image_caption, image_credit)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        work.id,
-        str(fd, "chapter"),
-        str(fd, "kind") || "scene",
-        quote,
-        str(fd, "note"),
-        order,
-        user.id,
-        image ?? "",
-        str(fd, "image_caption"),
-        str(fd, "image_credit"),
-      ).lastInsertRowid as number;
-
-    snapshotPassage(passageId, user.id, "新規作成");
-
-    const identId = db
-      .prepare(
-        `INSERT INTO identifications (passage_id, place_id, rationale, evidence, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(passageId, placeId, str(fd, "rationale"), str(fd, "evidence") || "research", user.id)
-      .lastInsertRowid as number;
-
-    db.prepare("INSERT OR IGNORE INTO votes (identification_id, user_id, value) VALUES (?, ?, 1)").run(
-      identId,
-      user.id,
-    );
+    image = await saveImage(fd.get("image"));
   } catch (e) {
     if (e instanceof UploadError) return { error: e.message };
+    return fail(e);
+  }
+
+  let placeId = Number(fd.get("place_id")) || 0;
+  let workSlug = "";
+  let problem: string | null = null;
+
+  try {
+    await tx(async (x) => {
+      const resolved = await resolveWork(x, fd, user.id);
+      if ("error" in resolved) {
+        problem = resolved.error;
+        throw new Error(resolved.error);
+      }
+      workSlug = resolved.slug;
+
+      if (!placeId) {
+        const name = str(fd, "place_name");
+        const lat = Number(fd.get("lat"));
+        const lng = Number(fd.get("lng"));
+        if (!name) {
+          problem = "場所の名前を入力してください";
+          throw new Error(problem);
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          problem = "地図をクリックして場所を指定してください";
+          throw new Error(problem);
+        }
+        const rows = await x.query<{ id: number }>(
+          `INSERT INTO places (name, lat, lng, prefecture, address, note, created_by, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $7) RETURNING id`,
+          [name, lat, lng, str(fd, "prefecture"), str(fd, "address"), str(fd, "place_note"), user.id],
+        );
+        placeId = rows[0].id;
+        await snapshotPlace(x, placeId, user.id, "新規作成");
+      }
+
+      const order = Number(
+        (
+          await x.query<{ n: number }>(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM passages WHERE work_id = $1",
+            [resolved.id],
+          )
+        )[0].n,
+      );
+
+      const passage = await x.query<{ id: number }>(
+        `INSERT INTO passages
+           (work_id, chapter, kind, quote, note, sort_order, created_by, image_path, image_caption, image_credit)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [
+          resolved.id,
+          str(fd, "chapter"),
+          str(fd, "kind") || "scene",
+          quote,
+          str(fd, "note"),
+          order,
+          user.id,
+          image ?? "",
+          str(fd, "image_caption"),
+          str(fd, "image_credit"),
+        ],
+      );
+      const passageId = passage[0].id;
+      await snapshotPassage(x, passageId, user.id, "新規作成");
+
+      const ident = await x.query<{ id: number }>(
+        `INSERT INTO identifications (passage_id, place_id, rationale, evidence, created_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [passageId, placeId, str(fd, "rationale"), str(fd, "evidence") || "research", user.id],
+      );
+      await x.query(
+        "INSERT INTO votes (identification_id, user_id, value) VALUES ($1, $2, 1) ON CONFLICT DO NOTHING",
+        [ident[0].id, user.id],
+      );
+    });
+  } catch (e) {
+    if (problem) return { error: problem };
     return fail(e);
   }
 
@@ -417,27 +486,31 @@ export async function voteAction(identificationId: number, value: 1 | -1): Promi
   const user = await currentUser();
   if (!user) return { error: "投票するにはログインが必要です" };
 
-  const row = db
-    .prepare("SELECT value FROM votes WHERE identification_id = ? AND user_id = ?")
-    .get(identificationId, user.id) as { value: number } | undefined;
+  const row = await one<{ value: number }>(
+    "SELECT value FROM votes WHERE identification_id = $1 AND user_id = $2",
+    [identificationId, user.id],
+  );
 
   if (row?.value === value) {
     // 同じボタンをもう一度押したら取り消し
-    db.prepare("DELETE FROM votes WHERE identification_id = ? AND user_id = ?").run(identificationId, user.id);
+    await query("DELETE FROM votes WHERE identification_id = $1 AND user_id = $2", [
+      identificationId,
+      user.id,
+    ]);
   } else {
-    db.prepare(
-      `INSERT INTO votes (identification_id, user_id, value) VALUES (?, ?, ?)
-       ON CONFLICT(identification_id, user_id) DO UPDATE SET value = excluded.value`,
-    ).run(identificationId, user.id, value);
+    await query(
+      `INSERT INTO votes (identification_id, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (identification_id, user_id) DO UPDATE SET value = EXCLUDED.value`,
+      [identificationId, user.id, value],
+    );
   }
 
-  const p = db
-    .prepare(
-      `SELECT p.id, w.slug FROM identifications i
-         JOIN passages p ON p.id = i.passage_id
-         JOIN works w ON w.id = p.work_id WHERE i.id = ?`,
-    )
-    .get(identificationId) as { id: number; slug: string } | undefined;
+  const p = await one<{ id: number; slug: string }>(
+    `SELECT p.id, w.slug FROM identifications i
+       JOIN passages p ON p.id = i.passage_id
+       JOIN works w ON w.id = p.work_id WHERE i.id = $1`,
+    [identificationId],
+  );
   if (p) {
     revalidatePath(`/passages/${p.id}`);
     revalidatePath(`/works/${p.slug}`);
@@ -446,7 +519,7 @@ export async function voteAction(identificationId: number, value: 1 | -1): Promi
   return { ok: "投票しました" };
 }
 
-/* ---------- 比定案の投稿 ---------- */
+/* ---------- 比定案の投稿（異説） ---------- */
 
 export async function addIdentificationAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await currentUser();
@@ -455,48 +528,56 @@ export async function addIdentificationAction(_prev: FormState, fd: FormData): P
   const passageId = Number(fd.get("passage_id"));
   if (!Number.isInteger(passageId)) return { error: "記述が指定されていません" };
 
+  const rationale = str(fd, "rationale");
+  if (rationale.length < 10) return { error: "根拠は10文字以上で書いてください（なぜそこだと考えたか）" };
+
+  let placeId = Number(fd.get("place_id")) || 0;
+  let problem: string | null = null;
+
   try {
-    let placeId = Number(fd.get("place_id")) || 0;
-
-    if (!placeId) {
-      const name = str(fd, "place_name");
-      const lat = Number(fd.get("lat"));
-      const lng = Number(fd.get("lng"));
-      if (!name) return { error: "場所の名前を入力してください" };
-      if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
-        return { error: "地図をクリックして場所の位置を指定してください" };
+    await tx(async (x) => {
+      if (!placeId) {
+        const name = str(fd, "place_name");
+        const lat = Number(fd.get("lat"));
+        const lng = Number(fd.get("lng"));
+        if (!name) {
+          problem = "場所の名前を入力してください";
+          throw new Error(problem);
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+          problem = "地図をクリックして場所の位置を指定してください";
+          throw new Error(problem);
+        }
+        const rows = await x.query<{ id: number }>(
+          `INSERT INTO places (name, lat, lng, prefecture, address, note, created_by, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $7) RETURNING id`,
+          [name, lat, lng, str(fd, "prefecture"), str(fd, "address"), str(fd, "place_note"), user.id],
+        );
+        placeId = rows[0].id;
+        await snapshotPlace(x, placeId, user.id, "新規作成");
       }
-      placeId = db
-        .prepare(
-          "INSERT INTO places (name, lat, lng, prefecture, address, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .run(name, lat, lng, str(fd, "prefecture"), str(fd, "address"), str(fd, "place_note"), user.id)
-        .lastInsertRowid as number;
-      snapshot(placeId, user.id, "新規作成");
-    }
 
-    const rationale = str(fd, "rationale");
-    if (rationale.length < 10) return { error: "根拠は10文字以上で書いてください（なぜそこだと考えたか）" };
+      const dup = await x.query("SELECT 1 FROM identifications WHERE passage_id = $1 AND place_id = $2", [
+        passageId,
+        placeId,
+      ]);
+      if (dup.length > 0) {
+        problem = "その場所はすでに候補として挙がっています。議論はコメント欄でどうぞ";
+        throw new Error(problem);
+      }
 
-    const dup = db
-      .prepare("SELECT id FROM identifications WHERE passage_id = ? AND place_id = ?")
-      .get(passageId, placeId) as { id: number } | undefined;
-    if (dup) return { error: "その場所はすでに候補として挙がっています。議論はコメント欄でどうぞ" };
-
-    const evidence = str(fd, "evidence") || "guess";
-    const identId = db
-      .prepare(
+      const ident = await x.query<{ id: number }>(
         `INSERT INTO identifications (passage_id, place_id, rationale, evidence, source_url, created_by)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(passageId, placeId, rationale, evidence, str(fd, "source_url"), user.id).lastInsertRowid as number;
-
-    // 提案者は自説に1票
-    db.prepare("INSERT OR IGNORE INTO votes (identification_id, user_id, value) VALUES (?, ?, 1)").run(
-      identId,
-      user.id,
-    );
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [passageId, placeId, rationale, str(fd, "evidence") || "guess", str(fd, "source_url"), user.id],
+      );
+      await x.query(
+        "INSERT INTO votes (identification_id, user_id, value) VALUES ($1, $2, 1) ON CONFLICT DO NOTHING",
+        [ident[0].id, user.id],
+      );
+    });
   } catch (e) {
+    if (problem) return { error: problem };
     return fail(e);
   }
 
@@ -518,9 +599,10 @@ export async function addCommentAction(_prev: FormState, fd: FormData): Promise<
 
   const identId = Number(fd.get("identification_id")) || null;
   try {
-    db.prepare(
-      "INSERT INTO comments (passage_id, identification_id, user_id, body) VALUES (?, ?, ?, ?)",
-    ).run(passageId, identId, user.id, body);
+    await query(
+      "INSERT INTO comments (passage_id, identification_id, user_id, body) VALUES ($1, $2, $3, $4)",
+      [passageId, identId, user.id, body],
+    );
   } catch (e) {
     return fail(e);
   }
@@ -530,20 +612,10 @@ export async function addCommentAction(_prev: FormState, fd: FormData): Promise<
 
 /* ---------- 作品の追加 ---------- */
 
-function makeSlug(input: string, title: string): string {
-  const base =
-    input.replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "") ||
-    title.replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "") ||
-    "work";
-  let slug = base;
-  let n = 2;
-  while (db.prepare("SELECT 1 FROM works WHERE slug = ?").get(slug)) slug = `${base}-${n++}`;
-  return slug;
-}
-
 export async function addWorkAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await currentUser();
   if (!user) return { error: "投稿するにはログインが必要です" };
+  await ensureDatabaseReady();
 
   const title = str(fd, "title");
   const author = str(fd, "author");
@@ -558,10 +630,14 @@ export async function addWorkAction(_prev: FormState, fd: FormData): Promise<For
 
   let slug: string;
   try {
-    slug = makeSlug(str(fd, "slug"), title);
-    db.prepare(
-      "INSERT INTO works (slug, title, author, medium, year, description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(slug, title, author, str(fd, "medium") || "novel", year, str(fd, "description"), user.id);
+    slug = await tx(async (x) => {
+      const s = await uniqueSlug(x, makeSlugBase(str(fd, "slug"), title));
+      await x.query(
+        "INSERT INTO works (slug, title, author, medium, year, description, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [s, title, author, str(fd, "medium") || "novel", year, str(fd, "description"), user.id],
+      );
+      return s;
+    });
   } catch (e) {
     return fail(e);
   }

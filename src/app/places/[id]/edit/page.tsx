@@ -8,7 +8,7 @@ import { getPlace } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const place = getPlace(Number(id));
+  const place = await getPlace(Number(id));
   return { title: place ? `${place.name}を編集` : "編集" };
 }
 
@@ -17,7 +17,7 @@ export default async function EditPlacePage({ params }: { params: Promise<{ id: 
   const placeId = Number(id);
   if (!Number.isInteger(placeId)) notFound();
 
-  const place = getPlace(placeId);
+  const place = await getPlace(placeId);
   if (!place) notFound();
 
   const user = await currentUser();

@@ -72,7 +72,9 @@
 ## 技術構成
 
 - **Next.js 15（App Router）/ React 19 / TypeScript** — 更新は Server Actions
-- **SQLite（better-sqlite3）** — `data/seichi.db` に自動生成・自動シード
+- **PostgreSQL** — 本番は `DATABASE_URL`（Supabase を想定）。未設定なら
+  **PGlite**（PostgreSQL の WASM 版）を `data/pgdata` に置いて使うので、
+  手元では何も用意せずに動く。SQL は本物の PostgreSQL 1種類だけ
 - **Leaflet + OpenStreetMap** — APIキー不要
 - 地名検索は手元のデータ（市区町村の索引＋都道府県表＋登録済みの場所）で完結。
   それでも見つからない地名だけ Nominatim に問い合わせる（サーバ側・1秒間隔・
@@ -80,7 +82,8 @@
   `SEICHI_GEOCODING=off` で外部問い合わせを止められます
 - **Tailwind CSS v4**
 - 認証は scrypt によるパスワードハッシュ＋DBセッション（Cookie）
-- 画像は `data/uploads/` に保存し、`/uploads/[name]` のルートハンドラから配信
+- 画像は Supabase Storage（未設定なら `data/uploads/`）に保存し、
+  `/uploads/[name]` のルートハンドラから配信
   （`public/` は `next start` がビルド時のファイルしか配信しないため使えない）
 
 ## 開発
@@ -90,8 +93,12 @@ npm install
 npm run dev     # http://localhost:3000
 ```
 
-初回起動時に `data/seichi.db` が作られ、サンプルデータが投入されます。
-作り直したいときは `rm -rf data` してから再起動してください。
+初回起動時に `data/pgdata` に PGlite のデータベースが作られ、サンプルデータが
+投入されます。作り直したいときは `rm -rf data` してから再起動してください。
+
+```bash
+npm run db:setup   # スキーマ作成とデータ投入を明示的に実行（何度流してもよい）
+```
 
 ### データの追加（データパック）
 
@@ -132,9 +139,58 @@ npm run build && npm start   # 本番ビルド
 サンプルデータのユーザーは全員パスワード `seichi2024` でログインできます
 （例：`kobo_map` / `soseki_walk` / `numazu_p` / `kamakura_lo`）。
 
+## Vercel + Supabase に公開する
+
+SQLite をやめて PostgreSQL にしてあるのは、Vercel のようなサーバーレス環境では
+**ファイルに書いても次のリクエストに残らない**ためです。画像も同じ理由で
+Supabase Storage に置きます。
+
+### 1. Supabase 側
+
+1. プロジェクトを作る（リージョンは Tokyo が近い）
+2. **Project Settings → Database → Connection string → Transaction pooler**
+   の文字列を控える（ポート **6543** のほう。サーバーレスから繋ぐのでこちらを使う）
+3. **Storage** で `uploads` という名前のバケットを作り、**Public** にする
+4. **Project Settings → API** から `Project URL` と `service_role` キーを控える
+
+### 2. 手元からデータを入れる
+
+```bash
+DATABASE_URL='postgresql://...pooler.supabase.com:6543/postgres' npm run db:setup
+```
+
+スキーマ作成とサンプルデータの投入がされます。何度実行しても増えません。
+
+### 3. Vercel 側
+
+GitHub リポジトリを Import し、環境変数を設定して Deploy するだけです
+（ビルド設定は既定のままで動きます）。
+
+| 変数 | 値 |
+| --- | --- |
+| `DATABASE_URL` | 手順1で控えた接続文字列 |
+| `SUPABASE_URL` | Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role キー（**公開しないこと**） |
+| `SUPABASE_STORAGE_BUCKET` | `uploads` |
+| `SEICHI_CONTACT` | 任意。地名検索で外部に名乗る連絡先 |
+
+`.env.example` に同じものを並べてあります。
+
+### 補足
+
+- 手順2を飛ばしても、最初のアクセス時にアプリ自身がスキーマとデータを作ります
+  （`pg_advisory_xact_lock` を取るので、同時に複数のインスタンスが起動しても
+  二重には入りません）。ただし最初の1リクエストが遅くなるので、
+  先に流しておくことを勧めます
+- `service_role` キーはサーバー側でしか使いません。`NEXT_PUBLIC_` を付けないこと
+- 作品を足したときは、`npm run db:setup` を本番の `DATABASE_URL` に対して
+  もう一度流せば、差分だけが入ります
+
 ## データモデル
 
 ```
+PostgreSQL
+
 places（場所＝項目）
   ├ place_revisions（版の履歴）      … 編集のたびに編集後の状態を1件積む
   ├ place_likes（いいね）

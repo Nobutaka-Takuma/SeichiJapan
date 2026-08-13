@@ -9,7 +9,7 @@ import { getAppearances, getPlace } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const place = getPlace(Number(id));
+  const place = await getPlace(Number(id));
   if (!place) return { title: "場所が見つかりません" };
   return {
     title: `${place.name}｜聖地の事典`,
@@ -54,10 +54,10 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
   if (!Number.isInteger(placeId)) notFound();
 
   const user = await currentUser();
-  const place = getPlace(placeId, user?.id);
+  const place = await getPlace(placeId, user?.id);
   if (!place) notFound();
 
-  const appearances = getAppearances(placeId);
+  const appearances = await getAppearances(placeId);
   const works = new Set(appearances.map((a) => a.work_slug));
 
   return (

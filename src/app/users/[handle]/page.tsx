@@ -6,16 +6,16 @@ import { getUserByHandle, getUserContributions } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
   const { handle } = await params;
-  const user = getUserByHandle(handle);
+  const user = await getUserByHandle(handle);
   return { title: user ? `${user.display_name}の貢献` : "ユーザーが見つかりません" };
 }
 
 export default async function UserPage({ params }: { params: Promise<{ handle: string }> }) {
   const { handle } = await params;
-  const user = getUserByHandle(handle);
+  const user = await getUserByHandle(handle);
   if (!user) notFound();
 
-  const { idents, comments, edits, votes, likes } = getUserContributions(user.id);
+  const { idents, comments, edits, votes, likes } = await getUserContributions(user.id);
 
   return (
     <div className="space-y-8">

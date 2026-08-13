@@ -1,5 +1,9 @@
-import { db } from "./db";
+import { count, one, query } from "./db";
+import { ensureDatabaseReady } from "./data";
 import { confidenceShares, consensusLevel, evidenceWeight, type ConsensusLevel } from "./confidence";
+
+/** どの入口から来ても、最初にスキーマとデータの用意を済ませておく。 */
+const ready = () => ensureDatabaseReady();
 
 export type Medium = "novel" | "anime" | "manga" | "film";
 
@@ -39,9 +43,9 @@ export type Place = {
   lng: number;
   prefecture: string;
   address: string;
-  note: string; // リード文（一覧・地図の吹き出しに出る短い説明）
+  note: string; // リード文
   body: string; // 記事本文（共同編集）
-  access: string; // 行き方・訪問時の注意
+  access: string;
   photo_path: string;
   updated_at: string | null;
   updated_by: number | null;
@@ -91,31 +95,39 @@ export type PassageWithCandidates = {
   consensus: ConsensusLevel;
 };
 
+type PassageRow = Omit<PassageWithCandidates, "candidates" | "consensus" | "votes">;
+
+const PASSAGE_COLUMNS = `p.id, p.work_id, p.chapter, p.kind, p.quote, p.note, p.created_at,
+       p.image_path, p.image_caption, p.image_credit, p.updated_at,
+       (SELECT handle FROM users WHERE id = p.updated_by) AS editor_handle,
+       (SELECT display_name FROM users WHERE id = p.updated_by) AS editor_name,
+       (SELECT COUNT(*)::int FROM passage_revisions r WHERE r.passage_id = p.id) AS revision_count,
+       COALESCE(u.handle, '') AS author_handle,
+       COALESCE(u.display_name, '退会したユーザー') AS author_name,
+       (SELECT COUNT(*)::int FROM comments c WHERE c.passage_id = p.id) AS comment_count`;
+
 /** 候補に確度を付けて返す。viewerId を渡すとその人の投票状態も含む。 */
-function candidatesFor(passageIds: number[], viewerId?: number): Map<number, Candidate[]> {
+async function candidatesFor(passageIds: number[], viewerId?: number): Promise<Map<number, Candidate[]>> {
   const byPassage = new Map<number, Candidate[]>();
   if (passageIds.length === 0) return byPassage;
-  const marks = passageIds.map(() => "?").join(",");
 
-  const rows = db
-    .prepare(
-      `SELECT i.id, i.passage_id, i.place_id, i.rationale, i.evidence, i.source_url, i.created_at,
-              pl.name AS place_name, pl.lat, pl.lng, pl.prefecture,
-              u.display_name AS proposer, u.handle AS proposer_handle,
-              COALESCE(SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END), 0) AS up,
-              COALESCE(SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END), 0) AS down,
-              COALESCE(MAX(CASE WHEN v.user_id = ? THEN v.value END), 0) AS my_vote
-         FROM identifications i
-         JOIN places pl ON pl.id = i.place_id
-         LEFT JOIN users u ON u.id = i.created_by
-         LEFT JOIN votes v ON v.identification_id = i.id
-        WHERE i.passage_id IN (${marks})
-        GROUP BY i.id
-        ORDER BY (up - down) DESC, i.created_at ASC`,
-    )
-    .all(viewerId ?? -1, ...passageIds) as (Omit<Candidate, "confidence"> & {
-    passage_id: number;
-  })[];
+  const rows = await query<Candidate & { passage_id: number }>(
+    `SELECT i.id, i.passage_id, i.place_id, i.rationale, i.evidence, i.source_url, i.created_at,
+            pl.name AS place_name, pl.lat, pl.lng, pl.prefecture,
+            COALESCE(u.display_name, '不明') AS proposer, COALESCE(u.handle, '') AS proposer_handle,
+            COALESCE(SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END), 0)::int AS up,
+            COALESCE(SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END), 0)::int AS down,
+            COALESCE(MAX(CASE WHEN v.user_id = $1 THEN v.value END), 0)::int AS my_vote
+       FROM identifications i
+       JOIN places pl ON pl.id = i.place_id
+       LEFT JOIN users u ON u.id = i.created_by
+       LEFT JOIN votes v ON v.identification_id = i.id
+      WHERE i.passage_id = ANY($2::int[])
+      GROUP BY i.id, pl.name, pl.lat, pl.lng, pl.prefecture, u.display_name, u.handle
+      ORDER BY (COALESCE(SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END), 0)
+              - COALESCE(SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END), 0)) DESC, i.created_at ASC`,
+    [viewerId ?? -1, passageIds],
+  );
 
   for (const r of rows) {
     const list = byPassage.get(r.passage_id) ?? [];
@@ -130,11 +142,8 @@ function candidatesFor(passageIds: number[], viewerId?: number): Map<number, Can
   return byPassage;
 }
 
-function attachCandidates(
-  rows: Omit<PassageWithCandidates, "candidates" | "consensus" | "votes">[],
-  viewerId?: number,
-): PassageWithCandidates[] {
-  const map = candidatesFor(
+async function attachCandidates(rows: PassageRow[], viewerId?: number): Promise<PassageWithCandidates[]> {
+  const map = await candidatesFor(
     rows.map((r) => r.id),
     viewerId,
   );
@@ -145,45 +154,19 @@ function attachCandidates(
       ...r,
       candidates,
       votes,
-      consensus: consensusLevel(candidates.map((c) => c.confidence), votes),
+      consensus: consensusLevel(
+        candidates.map((c) => c.confidence),
+        votes,
+      ),
     };
   });
 }
 
-const PASSAGE_COLUMNS = `p.id, p.work_id, p.chapter, p.kind, p.quote, p.note, p.created_at,
-       p.image_path, p.image_caption, p.image_credit, p.updated_at,
-       (SELECT handle FROM users WHERE id = p.updated_by) AS editor_handle,
-       (SELECT display_name FROM users WHERE id = p.updated_by) AS editor_name,
-       (SELECT COUNT(*) FROM passage_revisions r WHERE r.passage_id = p.id) AS revision_count,
-       COALESCE(u.handle, '') AS author_handle, COALESCE(u.display_name, '退会したユーザー') AS author_name,
-       (SELECT COUNT(*) FROM comments c WHERE c.passage_id = p.id) AS comment_count`;
-
-export function listWorks(query?: string, medium?: string): WorkSummary[] {
-  const where: string[] = [];
-  const params: Record<string, string> = {};
-  if (query) {
-    where.push("(w.title LIKE @q OR w.author LIKE @q)");
-    params.q = `%${query}%`;
-  }
-  if (medium && medium !== "all") {
-    where.push("w.medium = @m");
-    params.m = medium;
-  }
-  return db
-    .prepare(
-      `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description, ${WORK_COUNTS}
-         FROM works w
-         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-        ORDER BY place_count DESC, w.title ASC`,
-    )
-    .all(...(Object.keys(params).length ? [params] : [])) as WorkSummary[];
-}
-
 const WORK_COUNTS = `
-  (SELECT COUNT(DISTINCT i.place_id) FROM identifications i
+  (SELECT COUNT(DISTINCT i.place_id)::int FROM identifications i
      JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id) AS place_count,
-  (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS passage_count,
-  (SELECT COUNT(DISTINCT uid) FROM (
+  (SELECT COUNT(*)::int FROM passages p WHERE p.work_id = w.id) AS passage_count,
+  (SELECT COUNT(DISTINCT uid)::int FROM (
       SELECT p.created_by AS uid FROM passages p WHERE p.work_id = w.id
       UNION
       SELECT i.created_by FROM identifications i JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
@@ -193,79 +176,94 @@ const WORK_COUNTS = `
         JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
       UNION
       SELECT c.user_id FROM comments c JOIN passages p ON p.id = c.passage_id WHERE p.work_id = w.id
-  ) WHERE uid IS NOT NULL) AS contributor_count`;
+  ) t WHERE uid IS NOT NULL) AS contributor_count`;
 
-export function getWork(slug: string): WorkSummary | undefined {
-  return db
-    .prepare(
-      `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description, ${WORK_COUNTS}
-         FROM works w WHERE w.slug = ?`,
-    )
-    .get(slug) as WorkSummary | undefined;
+export async function listWorks(q?: string, medium?: string): Promise<WorkSummary[]> {
+  await ready();
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (q) {
+    params.push(`%${q}%`);
+    where.push(`(w.title ILIKE $${params.length} OR w.author ILIKE $${params.length})`);
+  }
+  if (medium && medium !== "all") {
+    params.push(medium);
+    where.push(`w.medium = $${params.length}`);
+  }
+  return query<WorkSummary>(
+    `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description, ${WORK_COUNTS}
+       FROM works w
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY place_count DESC, w.title ASC`,
+    params,
+  );
 }
 
-export function getWorkById(id: number): Work | undefined {
-  return db
-    .prepare("SELECT id, slug, title, author, medium, year, description FROM works WHERE id = ?")
-    .get(id) as Work | undefined;
+export async function getWork(slug: string): Promise<WorkSummary | undefined> {
+  await ready();
+  return one<WorkSummary>(
+    `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description, ${WORK_COUNTS}
+       FROM works w WHERE w.slug = $1`,
+    [slug],
+  );
 }
 
 export type WorkOption = { id: number; title: string; author: string; medium: Medium; place_count: number };
 
 /** 作品の予測入力用。作品数が増えても効くよう、件数を絞って返す。 */
-export function searchWorks(q: string, limit = 8): WorkOption[] {
+export async function searchWorks(q: string, limit = 8): Promise<WorkOption[]> {
+  await ready();
   const term = q.trim();
   if (!term) {
-    return db
-      .prepare(
-        `SELECT w.id, w.title, w.author, w.medium,
-                (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS place_count
-           FROM works w
-          ORDER BY place_count DESC, w.title ASC LIMIT ?`,
-      )
-      .all(limit) as WorkOption[];
-  }
-  return db
-    .prepare(
+    return query<WorkOption>(
       `SELECT w.id, w.title, w.author, w.medium,
-              (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS place_count
-         FROM works w
-        WHERE w.title LIKE @q OR w.author LIKE @q
-        ORDER BY
-          CASE WHEN w.title = @exact THEN 0
-               WHEN w.title LIKE @prefix THEN 1
-               ELSE 2 END,
-          place_count DESC, w.title ASC
-        LIMIT @limit`,
-    )
-    .all({ q: `%${term}%`, exact: term, prefix: `${term}%`, limit }) as WorkOption[];
+              (SELECT COUNT(*)::int FROM passages p WHERE p.work_id = w.id) AS place_count
+         FROM works w ORDER BY place_count DESC, w.title ASC LIMIT $1`,
+      [limit],
+    );
+  }
+  return query<WorkOption>(
+    `SELECT w.id, w.title, w.author, w.medium,
+            (SELECT COUNT(*)::int FROM passages p WHERE p.work_id = w.id) AS place_count
+       FROM works w
+      WHERE w.title ILIKE $1 OR w.author ILIKE $1
+      ORDER BY CASE WHEN w.title = $2 THEN 0 WHEN w.title ILIKE $3 THEN 1 ELSE 2 END,
+               place_count DESC, w.title ASC
+      LIMIT $4`,
+    [`%${term}%`, term, `${term}%`, limit],
+  );
 }
 
-export function getWorkPassages(workId: number, viewerId?: number): PassageWithCandidates[] {
-  const rows = db
-    .prepare(
-      `SELECT ${PASSAGE_COLUMNS}
-         FROM passages p LEFT JOIN users u ON u.id = p.created_by
-        WHERE p.work_id = ?
-        ORDER BY p.sort_order ASC, p.id ASC`,
-    )
-    .all(workId) as Omit<PassageWithCandidates, "candidates" | "consensus" | "votes">[];
+export async function getWorkPassages(workId: number, viewerId?: number): Promise<PassageWithCandidates[]> {
+  await ready();
+  const rows = await query<PassageRow>(
+    `SELECT ${PASSAGE_COLUMNS}
+       FROM passages p LEFT JOIN users u ON u.id = p.created_by
+      WHERE p.work_id = $1
+      ORDER BY p.sort_order ASC, p.id ASC`,
+    [workId],
+  );
   return attachCandidates(rows, viewerId);
 }
 
-export function getPassage(id: number, viewerId?: number): (PassageWithCandidates & { work: Work }) | undefined {
-  const row = db
-    .prepare(
-      `SELECT ${PASSAGE_COLUMNS}
-         FROM passages p LEFT JOIN users u ON u.id = p.created_by
-        WHERE p.id = ?`,
-    )
-    .get(id) as Omit<PassageWithCandidates, "candidates" | "consensus" | "votes"> | undefined;
+export async function getPassage(
+  id: number,
+  viewerId?: number,
+): Promise<(PassageWithCandidates & { work: Work }) | undefined> {
+  await ready();
+  const row = await one<PassageRow>(
+    `SELECT ${PASSAGE_COLUMNS}
+       FROM passages p LEFT JOIN users u ON u.id = p.created_by
+      WHERE p.id = $1`,
+    [id],
+  );
   if (!row) return undefined;
-  const work = db
-    .prepare("SELECT id, slug, title, author, medium, year, description FROM works WHERE id = ?")
-    .get(row.work_id) as Work;
-  return { ...attachCandidates([row], viewerId)[0], work };
+  const work = await one<Work>(
+    "SELECT id, slug, title, author, medium, year, description FROM works WHERE id = $1",
+    [row.work_id],
+  );
+  const [withCandidates] = await attachCandidates([row], viewerId);
+  return { ...withCandidates, work: work! };
 }
 
 export type CommentRow = {
@@ -278,20 +276,18 @@ export type CommentRow = {
   place_name: string | null;
 };
 
-export function getComments(passageId: number): CommentRow[] {
-  return db
-    .prepare(
-      `SELECT c.id, c.body, c.created_at, c.identification_id,
-              u.handle, u.display_name,
-              pl.name AS place_name
-         FROM comments c
-         JOIN users u ON u.id = c.user_id
-         LEFT JOIN identifications i ON i.id = c.identification_id
-         LEFT JOIN places pl ON pl.id = i.place_id
-        WHERE c.passage_id = ?
-        ORDER BY c.created_at ASC, c.id ASC`,
-    )
-    .all(passageId) as CommentRow[];
+export async function getComments(passageId: number): Promise<CommentRow[]> {
+  await ready();
+  return query<CommentRow>(
+    `SELECT c.id, c.body, c.created_at, c.identification_id, u.handle, u.display_name, pl.name AS place_name
+       FROM comments c
+       JOIN users u ON u.id = c.user_id
+       LEFT JOIN identifications i ON i.id = c.identification_id
+       LEFT JOIN places pl ON pl.id = i.place_id
+      WHERE c.passage_id = $1
+      ORDER BY c.created_at ASC, c.id ASC`,
+    [passageId],
+  );
 }
 
 export type PlaceDetail = Place & {
@@ -303,34 +299,21 @@ export type PlaceDetail = Place & {
   contributor_count: number;
 };
 
-export function getPlace(id: number, viewerId?: number): PlaceDetail | undefined {
-  const place = db.prepare(`SELECT ${PLACE_COLUMNS} FROM places WHERE id = ?`).get(id) as Place | undefined;
-  if (!place) return undefined;
-
-  const likes = (db.prepare("SELECT COUNT(*) AS n FROM place_likes WHERE place_id = ?").get(id) as { n: number }).n;
-  const liked = viewerId
-    ? !!db.prepare("SELECT 1 FROM place_likes WHERE place_id = ? AND user_id = ?").get(id, viewerId)
-    : false;
-  const editor = place.updated_by
-    ? (db.prepare("SELECT handle, display_name FROM users WHERE id = ?").get(place.updated_by) as
-        | { handle: string; display_name: string }
-        | undefined)
-    : undefined;
-  const revisions = db
-    .prepare(
-      "SELECT COUNT(*) AS n, COUNT(DISTINCT editor_id) AS c FROM place_revisions WHERE place_id = ?",
-    )
-    .get(id) as { n: number; c: number };
-
-  return {
-    ...place,
-    likes,
-    liked_by_me: liked,
-    editor_handle: editor?.handle ?? null,
-    editor_name: editor?.display_name ?? null,
-    revision_count: revisions.n,
-    contributor_count: revisions.c,
-  };
+export async function getPlace(id: number, viewerId?: number): Promise<PlaceDetail | undefined> {
+  await ready();
+  return one<PlaceDetail>(
+    `SELECT ${PLACE_COLUMNS.split(", ")
+      .map((c) => `pl.${c}`)
+      .join(", ")},
+            (SELECT COUNT(*)::int FROM place_likes l WHERE l.place_id = pl.id) AS likes,
+            EXISTS (SELECT 1 FROM place_likes l WHERE l.place_id = pl.id AND l.user_id = $2) AS liked_by_me,
+            (SELECT handle FROM users WHERE id = pl.updated_by) AS editor_handle,
+            (SELECT display_name FROM users WHERE id = pl.updated_by) AS editor_name,
+            (SELECT COUNT(*)::int FROM place_revisions r WHERE r.place_id = pl.id) AS revision_count,
+            (SELECT COUNT(DISTINCT r.editor_id)::int FROM place_revisions r WHERE r.place_id = pl.id) AS contributor_count
+       FROM places pl WHERE pl.id = $1`,
+    [id, viewerId ?? -1],
+  );
 }
 
 export type Revision = {
@@ -352,16 +335,14 @@ export type Revision = {
   created_at: string;
 };
 
-export function getRevisions(placeId: number): Revision[] {
-  return db
-    .prepare(
-      `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
-         FROM place_revisions r
-         LEFT JOIN users u ON u.id = r.editor_id
-        WHERE r.place_id = ?
-        ORDER BY r.id DESC`,
-    )
-    .all(placeId) as Revision[];
+export async function getRevisions(placeId: number): Promise<Revision[]> {
+  await ready();
+  return query<Revision>(
+    `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
+       FROM place_revisions r LEFT JOIN users u ON u.id = r.editor_id
+      WHERE r.place_id = $1 ORDER BY r.id DESC`,
+    [placeId],
+  );
 }
 
 export type PassageRevision = {
@@ -381,49 +362,36 @@ export type PassageRevision = {
   created_at: string;
 };
 
-export function getPassageRevisions(passageId: number): PassageRevision[] {
-  return db
-    .prepare(
-      `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
-         FROM passage_revisions r
-         LEFT JOIN users u ON u.id = r.editor_id
-        WHERE r.passage_id = ?
-        ORDER BY r.id DESC`,
-    )
-    .all(passageId) as PassageRevision[];
+export async function getPassageRevisions(passageId: number): Promise<PassageRevision[]> {
+  await ready();
+  return query<PassageRevision>(
+    `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
+       FROM passage_revisions r LEFT JOIN users u ON u.id = r.editor_id
+      WHERE r.passage_id = $1 ORDER BY r.id DESC`,
+    [passageId],
+  );
 }
 
-export function getRevision(id: number): Revision | undefined {
-  return db
-    .prepare(
-      `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
-         FROM place_revisions r
-         LEFT JOIN users u ON u.id = r.editor_id
-        WHERE r.id = ?`,
-    )
-    .get(id) as Revision | undefined;
-}
-
-/** 地図上のある点の近くにある登録済みの場所。地図から書き込むときの候補に使う。 */
-export function nearbyPlaces(lat: number, lng: number, limit = 6): (Place & { distance_m: number })[] {
+/** 地図上のある点の近くにある登録済みの場所。 */
+export async function nearbyPlaces(
+  lat: number,
+  lng: number,
+  limit = 6,
+): Promise<(Place & { distance_m: number })[]> {
+  await ready();
   // 緯度1度≒111km、経度は緯度に応じて縮む。粗い近似で十分。
   const latScale = 111_000;
   const lngScale = 111_000 * Math.cos((lat * Math.PI) / 180);
-  const rows = db
-    .prepare(
-      `SELECT ${PLACE_COLUMNS},
-              ((lat - @lat) * @latScale) AS dy,
-              ((lng - @lng) * @lngScale) AS dx
-         FROM places
-        WHERE lat BETWEEN @lat - 0.09 AND @lat + 0.09
-          AND lng BETWEEN @lng - 0.12 AND @lng + 0.12`,
-    )
-    .all({ lat, lng, latScale, lngScale }) as (Place & { dy: number; dx: number })[];
-
-  return rows
-    .map(({ dy, dx, ...p }) => ({ ...p, distance_m: Math.round(Math.hypot(dy, dx)) }))
-    .sort((a, b) => a.distance_m - b.distance_m)
-    .slice(0, limit);
+  return query<Place & { distance_m: number }>(
+    `SELECT ${PLACE_COLUMNS},
+            round(sqrt(power((lat - $1) * $3, 2) + power((lng - $2) * $4, 2)))::int AS distance_m
+       FROM places
+      WHERE lat BETWEEN $1 - 0.09 AND $1 + 0.09
+        AND lng BETWEEN $2 - 0.12 AND $2 + 0.12
+      ORDER BY distance_m ASC
+      LIMIT $5`,
+    [lat, lng, latScale, lngScale, limit],
+  );
 }
 
 export type Appearance = {
@@ -443,22 +411,22 @@ export type Appearance = {
   disputed: boolean;
 };
 
-/** ある場所が「どの作品のどのシーンに出てくるか」の逆引き。場所ページの主役。 */
-export function getAppearances(placeId: number): Appearance[] {
-  const rows = db
-    .prepare(
-      `SELECT i.passage_id, p.quote, p.kind, p.chapter, p.note,
-              p.image_path, p.image_caption, p.image_credit,
-              w.slug AS work_slug, w.title AS work_title, w.author AS work_author, w.medium
-         FROM identifications i
-         JOIN passages p ON p.id = i.passage_id
-         JOIN works w ON w.id = p.work_id
-        WHERE i.place_id = ?
-        ORDER BY i.created_at ASC`,
-    )
-    .all(placeId) as Omit<Appearance, "confidence" | "disputed">[];
+/** ある場所が「どの作品のどのシーンに出てくるか」の逆引き。 */
+export async function getAppearances(placeId: number): Promise<Appearance[]> {
+  await ready();
+  const rows = await query<Omit<Appearance, "confidence" | "disputed">>(
+    `SELECT i.passage_id, p.quote, p.kind, p.chapter, p.note,
+            p.image_path, p.image_caption, p.image_credit,
+            w.slug AS work_slug, w.title AS work_title, w.author AS work_author, w.medium
+       FROM identifications i
+       JOIN passages p ON p.id = i.passage_id
+       JOIN works w ON w.id = p.work_id
+      WHERE i.place_id = $1
+      ORDER BY i.created_at ASC, i.id ASC`,
+    [placeId],
+  );
 
-  const cands = candidatesFor(rows.map((r) => r.passage_id));
+  const cands = await candidatesFor(rows.map((r) => r.passage_id));
   return rows
     .map((r) => {
       const list = cands.get(r.passage_id) ?? [];
@@ -469,6 +437,57 @@ export function getAppearances(placeId: number): Appearance[] {
       };
     })
     .sort((a, b) => b.confidence - a.confidence);
+}
+
+export async function searchPlaces(q: string, limit = 20): Promise<Place[]> {
+  await ready();
+  return query<Place>(
+    `SELECT ${PLACE_COLUMNS} FROM places
+      WHERE name ILIKE $1 OR prefecture ILIKE $1 OR address ILIKE $1
+      ORDER BY name LIMIT $2`,
+    [`%${q}%`, limit],
+  );
+}
+
+export type PlaceCard = Place & { work_count: number; scene_count: number; likes: number };
+
+export async function listPlaces(
+  limit = 500,
+  sort: "likes" | "works" | "name" = "likes",
+  q = "",
+): Promise<PlaceCard[]> {
+  await ready();
+  const order =
+    sort === "likes"
+      ? "likes DESC, work_count DESC, pl.name ASC"
+      : sort === "works"
+        ? "work_count DESC, likes DESC, pl.name ASC"
+        : "pl.name ASC";
+  const term = q.trim();
+  return query<PlaceCard>(
+    `SELECT ${PLACE_COLUMNS.split(", ")
+      .map((c) => `pl.${c}`)
+      .join(", ")},
+            (SELECT COUNT(DISTINCT p.work_id)::int FROM identifications i
+               JOIN passages p ON p.id = i.passage_id WHERE i.place_id = pl.id) AS work_count,
+            (SELECT COUNT(*)::int FROM identifications i WHERE i.place_id = pl.id) AS scene_count,
+            (SELECT COUNT(*)::int FROM place_likes l WHERE l.place_id = pl.id) AS likes
+       FROM places pl
+      ${term ? "WHERE pl.name ILIKE $2 OR pl.prefecture ILIKE $2 OR pl.address ILIKE $2 OR pl.note ILIKE $2" : ""}
+      ORDER BY ${order}
+      LIMIT $1`,
+    term ? [limit, `%${term}%`] : [limit],
+  );
+}
+
+/** その利用者がいいねした場所のIDの集合。 */
+export async function likedPlaceIds(userId?: number): Promise<Set<number>> {
+  if (!userId) return new Set();
+  await ready();
+  const rows = await query<{ place_id: number }>("SELECT place_id FROM place_likes WHERE user_id = $1", [
+    userId,
+  ]);
+  return new Set(rows.map((r) => r.place_id));
 }
 
 export type Pin = {
@@ -493,35 +512,33 @@ export type Pin = {
 };
 
 /** 地図に落とすピン。各記述の候補すべてを返し、rank=0 が最有力。 */
-export function getPins(opts: { workId?: number; medium?: string } = {}): Pin[] {
+export async function getPins(opts: { workId?: number; medium?: string } = {}): Promise<Pin[]> {
+  await ready();
   const where: string[] = [];
-  const params: Record<string, unknown> = {};
+  const params: unknown[] = [];
   if (opts.workId) {
-    where.push("p.work_id = @workId");
-    params.workId = opts.workId;
+    params.push(opts.workId);
+    where.push(`p.work_id = $${params.length}`);
   }
   if (opts.medium && opts.medium !== "all") {
-    where.push("w.medium = @medium");
-    params.medium = opts.medium;
+    params.push(opts.medium);
+    where.push(`w.medium = $${params.length}`);
   }
-  const rows = db
-    .prepare(
-      `SELECT i.id AS identification_id, i.passage_id, i.place_id, pl.name AS place_name,
-              pl.lat, pl.lng, pl.prefecture, p.quote, p.kind, p.chapter, p.image_path,
-              (SELECT COUNT(*) FROM place_likes l WHERE l.place_id = pl.id) AS likes,
-              w.slug AS work_slug, w.title AS work_title, w.medium
-         FROM identifications i
-         JOIN places pl ON pl.id = i.place_id
-         JOIN passages p ON p.id = i.passage_id
-         JOIN works w ON w.id = p.work_id
-         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`,
-    )
-    .all(...(Object.keys(params).length ? [params] : [])) as Omit<
-    Pin,
-    "confidence" | "rank" | "disputed"
-  >[];
 
-  const cands = candidatesFor([...new Set(rows.map((r) => r.passage_id))]);
+  const rows = await query<Omit<Pin, "confidence" | "rank" | "disputed">>(
+    `SELECT i.id AS identification_id, i.passage_id, i.place_id, pl.name AS place_name,
+            pl.lat, pl.lng, pl.prefecture, p.quote, p.kind, p.chapter, p.image_path,
+            (SELECT COUNT(*)::int FROM place_likes l WHERE l.place_id = pl.id) AS likes,
+            w.slug AS work_slug, w.title AS work_title, w.medium
+       FROM identifications i
+       JOIN places pl ON pl.id = i.place_id
+       JOIN passages p ON p.id = i.passage_id
+       JOIN works w ON w.id = p.work_id
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`,
+    params,
+  );
+
+  const cands = await candidatesFor([...new Set(rows.map((r) => r.passage_id))]);
   return rows
     .map((r) => {
       const list = cands.get(r.passage_id) ?? [];
@@ -536,39 +553,6 @@ export function getPins(opts: { workId?: number; medium?: string } = {}): Pin[] 
     .sort((a, b) => a.rank - b.rank);
 }
 
-export function searchPlaces(q: string, limit = 20): Place[] {
-  return db
-    .prepare(
-      `SELECT ${PLACE_COLUMNS} FROM places
-        WHERE name LIKE @q OR prefecture LIKE @q OR address LIKE @q
-        ORDER BY name LIMIT @limit`,
-    )
-    .all({ q: `%${q}%`, limit }) as Place[];
-}
-
-export type PlaceCard = Place & { work_count: number; scene_count: number; likes: number };
-
-export function listPlaces(limit = 500, sort: "likes" | "works" | "name" = "likes"): PlaceCard[] {
-  const order =
-    sort === "likes"
-      ? "likes DESC, work_count DESC, pl.name ASC"
-      : sort === "works"
-        ? "work_count DESC, likes DESC, pl.name ASC"
-        : "pl.name ASC";
-  return db
-    .prepare(
-      `SELECT ${PLACE_COLUMNS.split(", ").map((c) => `pl.${c}`).join(", ")},
-              (SELECT COUNT(DISTINCT p.work_id) FROM identifications i
-                 JOIN passages p ON p.id = i.passage_id WHERE i.place_id = pl.id) AS work_count,
-              (SELECT COUNT(*) FROM identifications i WHERE i.place_id = pl.id) AS scene_count,
-              (SELECT COUNT(*) FROM place_likes l WHERE l.place_id = pl.id) AS likes
-         FROM places pl
-        ORDER BY ${order}
-        LIMIT ?`,
-    )
-    .all(limit) as PlaceCard[];
-}
-
 export type SiteStats = {
   works: number;
   places: number;
@@ -580,18 +564,19 @@ export type SiteStats = {
   photos: number;
 };
 
-export function siteStats(): SiteStats {
-  const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
-  return {
-    works: one("SELECT COUNT(*) AS n FROM works"),
-    places: one("SELECT COUNT(*) AS n FROM places"),
-    passages: one("SELECT COUNT(*) AS n FROM passages"),
-    users: one("SELECT COUNT(*) AS n FROM users"),
-    votes: one("SELECT COUNT(*) AS n FROM votes"),
-    likes: one("SELECT COUNT(*) AS n FROM place_likes"),
-    edits: one("SELECT COUNT(*) AS n FROM place_revisions"),
-    photos: one("SELECT COUNT(*) AS n FROM passages WHERE image_path <> ''"),
-  };
+export async function siteStats(): Promise<SiteStats> {
+  await ready();
+  const [works, places, passages, users, votes, likes, edits, photos] = await Promise.all([
+    count("SELECT COUNT(*) AS n FROM works"),
+    count("SELECT COUNT(*) AS n FROM places"),
+    count("SELECT COUNT(*) AS n FROM passages"),
+    count("SELECT COUNT(*) AS n FROM users"),
+    count("SELECT COUNT(*) AS n FROM votes"),
+    count("SELECT COUNT(*) AS n FROM place_likes"),
+    count("SELECT COUNT(*) AS n FROM place_revisions"),
+    count("SELECT COUNT(*) AS n FROM passages WHERE image_path <> ''"),
+  ]);
+  return { works, places, passages, users, votes, likes, edits, photos };
 }
 
 export type ActivityItem = {
@@ -604,66 +589,65 @@ export type ActivityItem = {
   actor_handle: string;
 };
 
-export function recentActivity(limit = 12): ActivityItem[] {
-  const scenes = db
-    .prepare(
+export async function recentActivity(limit = 12): Promise<ActivityItem[]> {
+  await ready();
+
+  const [scenes, comments, edits] = await Promise.all([
+    query<{
+      created_at: string;
+      passage_id: number;
+      quote: string;
+      place_id: number;
+      place_name: string;
+      work_title: string;
+      actor: string;
+      actor_handle: string;
+    }>(
       `SELECT i.created_at, p.id AS passage_id, p.quote, pl.id AS place_id, pl.name AS place_name,
               w.title AS work_title,
-              COALESCE(u.display_name,'不明') AS actor, COALESCE(u.handle,'') AS actor_handle
+              COALESCE(u.display_name, '不明') AS actor, COALESCE(u.handle, '') AS actor_handle
          FROM identifications i
          JOIN passages p ON p.id = i.passage_id
          JOIN works w ON w.id = p.work_id
          JOIN places pl ON pl.id = i.place_id
          LEFT JOIN users u ON u.id = i.created_by
-        ORDER BY i.created_at DESC, i.id DESC LIMIT ?`,
-    )
-    .all(limit) as {
-    created_at: string;
-    passage_id: number;
-    quote: string;
-    place_id: number;
-    place_name: string;
-    work_title: string;
-    actor: string;
-    actor_handle: string;
-  }[];
-
-  const comments = db
-    .prepare(
+        ORDER BY i.created_at DESC, i.id DESC LIMIT $1`,
+      [limit],
+    ),
+    query<{
+      created_at: string;
+      passage_id: number;
+      body: string;
+      work_title: string;
+      actor: string;
+      actor_handle: string;
+    }>(
       `SELECT c.created_at, p.id AS passage_id, substr(c.body, 1, 70) AS body, w.title AS work_title,
               u.display_name AS actor, u.handle AS actor_handle
          FROM comments c
          JOIN passages p ON p.id = c.passage_id
          JOIN works w ON w.id = p.work_id
          JOIN users u ON u.id = c.user_id
-        ORDER BY c.created_at DESC, c.id DESC LIMIT ?`,
-    )
-    .all(limit) as {
-    created_at: string;
-    passage_id: number;
-    body: string;
-    work_title: string;
-    actor: string;
-    actor_handle: string;
-  }[];
-
-  const edits = db
-    .prepare(
+        ORDER BY c.created_at DESC, c.id DESC LIMIT $1`,
+      [limit],
+    ),
+    query<{
+      created_at: string;
+      place_id: number;
+      summary: string;
+      place_name: string;
+      actor: string;
+      actor_handle: string;
+    }>(
       `SELECT r.created_at, r.place_id, r.summary, pl.name AS place_name,
-              COALESCE(u.display_name,'不明') AS actor, COALESCE(u.handle,'') AS actor_handle
+              COALESCE(u.display_name, '不明') AS actor, COALESCE(u.handle, '') AS actor_handle
          FROM place_revisions r
          JOIN places pl ON pl.id = r.place_id
          LEFT JOIN users u ON u.id = r.editor_id
-        ORDER BY r.created_at DESC, r.id DESC LIMIT ?`,
-    )
-    .all(limit) as {
-    created_at: string;
-    place_id: number;
-    summary: string;
-    place_name: string;
-    actor: string;
-    actor_handle: string;
-  }[];
+        ORDER BY r.created_at DESC, r.id DESC LIMIT $1`,
+      [limit],
+    ),
+  ]);
 
   const items: ActivityItem[] = [
     ...scenes.map((s) => ({
@@ -699,21 +683,20 @@ export function recentActivity(limit = 12): ActivityItem[] {
 }
 
 /** 議論が割れている記述（確度が拮抗しているもの）を拾う。 */
-export function contestedPassages(limit = 6): (PassageWithCandidates & { work_title: string; work_slug: string })[] {
-  const rows = db
-    .prepare(
-      `SELECT ${PASSAGE_COLUMNS}, w.title AS work_title, w.slug AS work_slug
-         FROM passages p
-         JOIN works w ON w.id = p.work_id
-         LEFT JOIN users u ON u.id = p.created_by
-        WHERE (SELECT COUNT(*) FROM identifications i WHERE i.passage_id = p.id) > 1`,
-    )
-    .all() as (Omit<PassageWithCandidates, "candidates" | "consensus" | "votes"> & {
-    work_title: string;
-    work_slug: string;
-  })[];
+export async function contestedPassages(
+  limit = 6,
+): Promise<(PassageWithCandidates & { work_title: string; work_slug: string })[]> {
+  await ready();
+  const rows = await query<PassageRow & { work_title: string; work_slug: string }>(
+    `SELECT ${PASSAGE_COLUMNS}, w.title AS work_title, w.slug AS work_slug
+       FROM passages p
+       JOIN works w ON w.id = p.work_id
+       LEFT JOIN users u ON u.id = p.created_by
+      WHERE (SELECT COUNT(*) FROM identifications i WHERE i.passage_id = p.id) > 1`,
+  );
 
-  return attachCandidates(rows)
+  const attached = await attachCandidates(rows);
+  return attached
     .map((p, i) => ({ ...p, work_title: rows[i].work_title, work_slug: rows[i].work_slug }))
     .sort((a, b) => (a.candidates[0]?.confidence ?? 1) - (b.candidates[0]?.confidence ?? 1))
     .slice(0, limit);
@@ -727,59 +710,53 @@ export type UserProfile = {
   created_at: string;
 };
 
-export function getUserByHandle(handle: string): UserProfile | undefined {
-  return db
-    .prepare("SELECT id, handle, display_name, bio, created_at FROM users WHERE handle = ?")
-    .get(handle) as UserProfile | undefined;
+export async function getUserByHandle(handle: string): Promise<UserProfile | undefined> {
+  await ready();
+  return one<UserProfile>(
+    "SELECT id, handle, display_name, bio, created_at FROM users WHERE handle = $1",
+    [handle],
+  );
 }
 
-export function getUserContributions(userId: number) {
-  const idents = db
-    .prepare(
+export async function getUserContributions(userId: number) {
+  await ready();
+  const [idents, comments, edits, votes, likes] = await Promise.all([
+    query<{
+      id: number;
+      created_at: string;
+      rationale: string;
+      place_name: string;
+      passage_id: number;
+      quote: string;
+      work_title: string;
+      work_slug: string;
+    }>(
       `SELECT i.id, i.created_at, i.rationale, pl.name AS place_name, p.id AS passage_id, p.quote,
               w.title AS work_title, w.slug AS work_slug
          FROM identifications i
          JOIN places pl ON pl.id = i.place_id
          JOIN passages p ON p.id = i.passage_id
          JOIN works w ON w.id = p.work_id
-        WHERE i.created_by = ? ORDER BY i.created_at DESC LIMIT 50`,
-    )
-    .all(userId) as {
-    id: number;
-    created_at: string;
-    rationale: string;
-    place_name: string;
-    passage_id: number;
-    quote: string;
-    work_title: string;
-    work_slug: string;
-  }[];
-
-  const comments = db
-    .prepare(
+        WHERE i.created_by = $1 ORDER BY i.created_at DESC LIMIT 50`,
+      [userId],
+    ),
+    query<{ id: number; body: string; created_at: string; passage_id: number; quote: string; work_title: string }>(
       `SELECT c.id, c.body, c.created_at, p.id AS passage_id, p.quote, w.title AS work_title
          FROM comments c
          JOIN passages p ON p.id = c.passage_id
          JOIN works w ON w.id = p.work_id
-        WHERE c.user_id = ? ORDER BY c.created_at DESC LIMIT 50`,
-    )
-    .all(userId) as { id: number; body: string; created_at: string; passage_id: number; quote: string; work_title: string }[];
-
-  const edits = db
-    .prepare(
+        WHERE c.user_id = $1 ORDER BY c.created_at DESC LIMIT 50`,
+      [userId],
+    ),
+    query<{ id: number; created_at: string; summary: string; place_id: number; place_name: string }>(
       `SELECT r.id, r.created_at, r.summary, r.place_id, pl.name AS place_name
-         FROM place_revisions r
-         JOIN places pl ON pl.id = r.place_id
-        WHERE r.editor_id = ? ORDER BY r.created_at DESC LIMIT 50`,
-    )
-    .all(userId) as { id: number; created_at: string; summary: string; place_id: number; place_name: string }[];
+         FROM place_revisions r JOIN places pl ON pl.id = r.place_id
+        WHERE r.editor_id = $1 ORDER BY r.created_at DESC LIMIT 50`,
+      [userId],
+    ),
+    count("SELECT COUNT(*) AS n FROM votes WHERE user_id = $1", [userId]),
+    count("SELECT COUNT(*) AS n FROM place_likes WHERE user_id = $1", [userId]),
+  ]);
 
-  const count = (sql: string) => (db.prepare(sql).get(userId) as { n: number }).n;
-  return {
-    idents,
-    comments,
-    edits,
-    votes: count("SELECT COUNT(*) AS n FROM votes WHERE user_id = ?"),
-    likes: count("SELECT COUNT(*) AS n FROM place_likes WHERE user_id = ?"),
-  };
+  return { idents, comments, edits, votes, likes };
 }

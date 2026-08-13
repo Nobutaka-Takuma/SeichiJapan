@@ -8,7 +8,7 @@ import { getPassage } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const passage = getPassage(Number(id));
+  const passage = await getPassage(Number(id));
   return { title: passage ? `シーンを編集｜${passage.work.title}` : "編集" };
 }
 
@@ -17,7 +17,7 @@ export default async function EditPassagePage({ params }: { params: Promise<{ id
   const passageId = Number(id);
   if (!Number.isInteger(passageId)) notFound();
 
-  const passage = getPassage(passageId);
+  const passage = await getPassage(passageId);
   if (!passage) notFound();
 
   const user = await currentUser();

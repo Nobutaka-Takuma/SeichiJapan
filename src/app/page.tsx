@@ -3,27 +3,28 @@ import { LikeButton } from "@/components/LikeButton";
 import { MapView, type MapPin } from "@/components/MapView";
 import { Card, ConfidenceBar, Empty, MediumBadge, SectionTitle, Stat } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { contestedPassages, getPins, listPlaces, listWorks, recentActivity, siteStats } from "@/lib/queries";
+import {
+  contestedPassages,
+  getPins,
+  likedPlaceIds,
+  listPlaces,
+  listWorks,
+  recentActivity,
+  siteStats,
+} from "@/lib/queries";
 
 const ACTIVITY_LABEL = { scene: "シーン", edit: "加筆", comment: "議論" } as const;
 
 export default async function Home() {
   const user = await currentUser();
-  const stats = siteStats();
-  const works = listWorks().slice(0, 6);
-  const pins = getPins();
-  const popular = listPlaces(6, "likes");
-  const contested = contestedPassages(2);
-  const activity = recentActivity(10);
+  const stats = await siteStats();
+  const works = (await listWorks()).slice(0, 6);
+  const pins = await getPins();
+  const popular = await listPlaces(6, "likes");
+  const contested = await contestedPassages(2);
+  const activity = await recentActivity(10);
 
-  const likedIds = new Set(
-    user
-      ? (db.prepare("SELECT place_id FROM place_likes WHERE user_id = ?").all(user.id) as { place_id: number }[]).map(
-          (r) => r.place_id,
-        )
-      : [],
-  );
+  const likedIds = await likedPlaceIds(user?.id);
 
   const mapPins: MapPin[] = pins
     .filter((p) => p.rank === 0)

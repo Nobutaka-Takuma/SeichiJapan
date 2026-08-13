@@ -24,8 +24,8 @@ export default async function NewScenePage({
     redirect(`/login?next=${encodeURIComponent(`/scenes/new${back.toString() ? `?${back}` : ""}`)}`);
   }
 
-  const place = placeParam ? getPlace(Number(placeParam)) : undefined;
-  const work = workParam ? getWork(decodeParam(workParam)) : undefined;
+  const place = placeParam ? await getPlace(Number(placeParam)) : undefined;
+  const work = workParam ? await getWork(decodeParam(workParam)) : undefined;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

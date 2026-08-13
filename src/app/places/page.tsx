@@ -3,8 +3,7 @@ import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { Card, Empty } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
-import { listPlaces } from "@/lib/queries";
-import { db } from "@/lib/db";
+import { likedPlaceIds, listPlaces } from "@/lib/queries";
 
 export const metadata: Metadata = {
   title: "場所一覧",
@@ -24,22 +23,11 @@ export default async function PlacesPage({
 }) {
   const { sort = "likes", q = "" } = await searchParams;
   const key = (SORTS.find((s) => s.key === sort)?.key ?? "likes") as "likes" | "works" | "name";
-  const all = listPlaces(500, key);
   const term = q.trim();
-  const places = term
-    ? all.filter((p) =>
-        [p.name, p.prefecture, p.address, p.note].some((v) => v?.includes(term)),
-      )
-    : all;
+  const places = await listPlaces(500, key, term);
   const user = await currentUser();
 
-  const likedIds = new Set(
-    user
-      ? (db.prepare("SELECT place_id FROM place_likes WHERE user_id = ?").all(user.id) as { place_id: number }[]).map(
-          (r) => r.place_id,
-        )
-      : [],
-  );
+  const likedIds = await likedPlaceIds(user?.id);
 
   return (
     <div className="space-y-6">

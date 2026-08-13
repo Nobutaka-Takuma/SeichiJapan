@@ -8,5 +8,5 @@ export async function GET(request: Request) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return NextResponse.json({ places: [] }, { status: 400 });
   }
-  return NextResponse.json({ places: nearbyPlaces(lat, lng, 6) });
+  return NextResponse.json({ places: await nearbyPlaces(lat, lng, 6) });
 }

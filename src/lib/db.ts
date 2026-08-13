@@ -1,222 +1,151 @@
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { seedDatabase } from "./data";
 
-const DB_PATH = process.env.SEICHI_DB ?? path.join(process.cwd(), "data", "seichi.db");
+/**
+ * データベース接続。
+ *
+ * 本番（Vercel など）は DATABASE_URL の PostgreSQL に繋ぐ。Supabase を想定。
+ * DATABASE_URL が無いときは PGlite（PostgreSQL の WASM 版）を data/ の下に置いて使う。
+ * どちらも本物の PostgreSQL なので、SQL は1種類だけ書けばよい。
+ */
 
-const SCHEMA = `
-PRAGMA foreign_keys = ON;
+export type Executor = {
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
+  /** 複数文をまとめて流す（スキーマ定義用）。プレースホルダは使えない。 */
+  exec(sql: string): Promise<void>;
+};
 
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  handle        TEXT NOT NULL UNIQUE,
-  display_name  TEXT NOT NULL,
-  bio           TEXT NOT NULL DEFAULT '',
-  password_hash TEXT NOT NULL,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
+const PGLITE_DIR = process.env.SEICHI_PGDATA ?? path.join(process.cwd(), "data", "pgdata");
 
-CREATE TABLE IF NOT EXISTS sessions (
-  token      TEXT PRIMARY KEY,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+/** 日時は文字列のまま受け取る（画面側で先頭10文字を切って日付として使うため）。 */
+const TIMESTAMPTZ_OID = 1184;
+const TIMESTAMP_OID = 1114;
 
--- 作品（小説・アニメ・漫画・映画）
-CREATE TABLE IF NOT EXISTS works (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  slug        TEXT NOT NULL UNIQUE,
-  title       TEXT NOT NULL,
-  author      TEXT NOT NULL,
-  medium      TEXT NOT NULL DEFAULT 'novel',  -- novel | anime | manga | film
-  year        INTEGER,
-  description TEXT NOT NULL DEFAULT '',
-  created_by  INTEGER REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
+type Driver = Executor & {
+  transaction<T>(fn: (x: Executor) => Promise<T>): Promise<T>;
+};
 
--- 実在の場所
-CREATE TABLE IF NOT EXISTS places (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  name       TEXT NOT NULL,
-  lat        REAL NOT NULL,
-  lng        REAL NOT NULL,
-  prefecture TEXT NOT NULL DEFAULT '',
-  address    TEXT NOT NULL DEFAULT '',
-  note       TEXT NOT NULL DEFAULT '',
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+async function createPostgres(url: string): Promise<Driver> {
+  const { Pool, types } = await import("pg");
+  types.setTypeParser(TIMESTAMPTZ_OID, (v: string) => v);
+  types.setTypeParser(TIMESTAMP_OID, (v: string) => v);
 
--- 作中の記述（本文の一節・シーン）。これが「解釈」の対象。
-CREATE TABLE IF NOT EXISTS passages (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  work_id     INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-  chapter     TEXT NOT NULL DEFAULT '',
-  kind        TEXT NOT NULL DEFAULT 'text',   -- text（本文引用） | scene（場面の記述）
-  quote       TEXT NOT NULL,
-  note        TEXT NOT NULL DEFAULT '',
-  sort_order  INTEGER NOT NULL DEFAULT 0,
-  created_by  INTEGER REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_passages_work ON passages(work_id);
+  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
+  const pool = new Pool({
+    connectionString: url,
+    // サーバーレスでは1リクエスト1接続に近い。接続数を抑え、遊んでいる接続は早く返す。
+    max: Number(process.env.PGPOOL_MAX ?? 1),
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+    ssl: local || process.env.PGSSL === "off" ? undefined : { rejectUnauthorized: false },
+  });
 
--- 比定（この記述はこの場所だ、という説）
-CREATE TABLE IF NOT EXISTS identifications (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  passage_id  INTEGER NOT NULL REFERENCES passages(id) ON DELETE CASCADE,
-  place_id    INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
-  rationale   TEXT NOT NULL DEFAULT '',
-  evidence    TEXT NOT NULL DEFAULT 'guess', -- guess | research | official
-  source_url  TEXT NOT NULL DEFAULT '',
-  created_by  INTEGER REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(passage_id, place_id)
-);
-CREATE INDEX IF NOT EXISTS idx_ident_passage ON identifications(passage_id);
-CREATE INDEX IF NOT EXISTS idx_ident_place ON identifications(place_id);
-
--- 支持／不支持
-CREATE TABLE IF NOT EXISTS votes (
-  identification_id INTEGER NOT NULL REFERENCES identifications(id) ON DELETE CASCADE,
-  user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  value             INTEGER NOT NULL, -- 1 | -1
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (identification_id, user_id)
-);
-
--- 議論
-CREATE TABLE IF NOT EXISTS comments (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  passage_id        INTEGER NOT NULL REFERENCES passages(id) ON DELETE CASCADE,
-  identification_id INTEGER REFERENCES identifications(id) ON DELETE CASCADE,
-  user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  body              TEXT NOT NULL,
-  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_comments_passage ON comments(passage_id);
-
--- 場所の記事の版。編集のたびに「編集後の状態」を1件積む。
-CREATE TABLE IF NOT EXISTS place_revisions (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  place_id    INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
-  editor_id   INTEGER REFERENCES users(id),
-  name        TEXT NOT NULL,
-  lat         REAL NOT NULL,
-  lng         REAL NOT NULL,
-  prefecture  TEXT NOT NULL DEFAULT '',
-  address     TEXT NOT NULL DEFAULT '',
-  note        TEXT NOT NULL DEFAULT '',
-  body        TEXT NOT NULL DEFAULT '',
-  access      TEXT NOT NULL DEFAULT '',
-  photo_path  TEXT NOT NULL DEFAULT '',
-  summary     TEXT NOT NULL DEFAULT '',  -- 編集要約
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_revisions_place ON place_revisions(place_id, id DESC);
-
--- シーンの版。場所と同じく、誰でも直せて履歴が残る。
-CREATE TABLE IF NOT EXISTS passage_revisions (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  passage_id    INTEGER NOT NULL REFERENCES passages(id) ON DELETE CASCADE,
-  editor_id     INTEGER REFERENCES users(id),
-  chapter       TEXT NOT NULL DEFAULT '',
-  kind          TEXT NOT NULL DEFAULT 'scene',
-  quote         TEXT NOT NULL,
-  note          TEXT NOT NULL DEFAULT '',
-  image_path    TEXT NOT NULL DEFAULT '',
-  image_caption TEXT NOT NULL DEFAULT '',
-  image_credit  TEXT NOT NULL DEFAULT '',
-  summary       TEXT NOT NULL DEFAULT '',
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_prev_passage ON passage_revisions(passage_id, id DESC);
-
--- 場所への「いいね」
-CREATE TABLE IF NOT EXISTS place_likes (
-  place_id   INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (place_id, user_id)
-);
-`;
-
-/** 既存のDBに後から足した列を補う。 */
-function migrate(db: Database.Database) {
-  const add = (table: string, column: string, ddl: string) => {
-    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (cols.some((c) => c.name === column)) return;
-    try {
-      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
-    } catch (e) {
-      // ビルド時は複数のワーカーが同時にここへ来る。
-      // 先に追加されていたら、それでよい。
-      if (!/duplicate column name/i.test(String((e as Error).message))) throw e;
-    }
+  return {
+    async query(text, params) {
+      const res = await pool.query(text, params as never[]);
+      return res.rows;
+    },
+    async exec(sql) {
+      // 引数なしの query は簡易プロトコルになり、複数文をまとめて流せる
+      await pool.query(sql);
+    },
+    async transaction(fn) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const out = await fn({
+          async query(text, params) {
+            const res = await client.query(text, params as never[]);
+            return res.rows;
+          },
+          async exec(sql) {
+            await client.query(sql);
+          },
+        });
+        await client.query("COMMIT");
+        return out;
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
   };
+}
 
-  // 場所を「事典の項目」にするための列
-  add("places", "body", "TEXT NOT NULL DEFAULT ''"); // 記事本文
-  add("places", "access", "TEXT NOT NULL DEFAULT ''"); // 行き方・訪問時の注意
-  add("places", "photo_path", "TEXT NOT NULL DEFAULT ''"); // 現地写真
-  add("places", "updated_at", "TEXT");
-  add("places", "updated_by", "INTEGER REFERENCES users(id)");
+async function createPglite(): Promise<Driver> {
+  const { PGlite } = await import("@electric-sql/pglite");
+  fs.mkdirSync(path.dirname(PGLITE_DIR), { recursive: true });
+  const pg = new PGlite(PGLITE_DIR, {
+    parsers: { [TIMESTAMPTZ_OID]: (v: string) => v, [TIMESTAMP_OID]: (v: string) => v },
+  });
+  await pg.waitReady;
 
-  // シーンに添える画像（アニメのカット、小説なら挿絵や現地写真）
-  add("passages", "image_path", "TEXT NOT NULL DEFAULT ''");
-  add("passages", "image_caption", "TEXT NOT NULL DEFAULT ''");
-  add("passages", "image_credit", "TEXT NOT NULL DEFAULT ''");
-  add("passages", "updated_at", "TEXT");
-  add("passages", "updated_by", "INTEGER REFERENCES users(id)");
+  return {
+    async query(text, params) {
+      const res = await pg.query(text, params as unknown[]);
+      return res.rows as never[];
+    },
+    async exec(sql) {
+      await pg.exec(sql);
+    },
+    async transaction(fn) {
+      return pg.transaction(async (t) => {
+        return fn({
+          async query(text, params) {
+            const res = await t.query(text, params as unknown[]);
+            return res.rows as never[];
+          },
+          async exec(sql) {
+            await t.exec(sql);
+          },
+        });
+      }) as Promise<never>;
+    },
+  };
 }
 
 declare global {
-  var __seichiDb: Database.Database | undefined;
+  var __seichiDb: Promise<Driver> | undefined;
 }
 
-/** ロック解放を待つあいだ、この同期処理を止める。 */
-function sleepSync(ms: number) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function connect(): Promise<Driver> {
+  const url = process.env.DATABASE_URL;
+  return url ? createPostgres(url) : createPglite();
 }
 
-function isBusy(e: unknown): boolean {
-  const code = (e as { code?: string })?.code;
-  return code === "SQLITE_BUSY" || code === "SQLITE_BUSY_SNAPSHOT" || code === "SQLITE_LOCKED";
+/** 接続は1プロセスに1つだけ作る。 */
+export function driver(): Promise<Driver> {
+  return (globalThis.__seichiDb ??= connect());
 }
 
-function open(): Database.Database {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const db = new Database(DB_PATH);
-  // ビルド時は複数のワーカーが同時にこのDBを開く。ロック待ちを許容する。
-  db.pragma("busy_timeout = 15000");
-
-  // journal_mode の切り替えは排他ロックを要求し、busy_timeout が効かないことがある。
-  // 一度成功すればファイルに記録されるので、失敗しても先へ進んでよい。
-  for (let i = 0; i < 5; i++) {
-    try {
-      db.pragma("journal_mode = WAL");
-      break;
-    } catch (e) {
-      if (!isBusy(e)) break;
-      sleepSync(150 * (i + 1));
-    }
-  }
-
-  // 初期化そのものも、他のワーカーとかち合ったら待って試し直す。
-  for (let i = 0; ; i++) {
-    try {
-      db.exec(SCHEMA);
-      migrate(db);
-      seedDatabase(db);
-      break;
-    } catch (e) {
-      if (!isBusy(e) || i >= 6) throw e;
-      sleepSync(300 * (i + 1));
-    }
-  }
-  return db;
+export async function query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
+  const db = await driver();
+  return db.query<T>(text, params);
 }
 
-export const db: Database.Database = globalThis.__seichiDb ?? (globalThis.__seichiDb = open());
+/** 1行だけ取る。無ければ undefined。 */
+export async function one<T = Record<string, unknown>>(
+  text: string,
+  params?: unknown[],
+): Promise<T | undefined> {
+  const rows = await query<T>(text, params);
+  return rows[0];
+}
+
+/** 件数など、1つの数値だけ取る。 */
+export async function count(text: string, params?: unknown[]): Promise<number> {
+  const row = await one<{ n: string | number }>(text, params);
+  return Number(row?.n ?? 0);
+}
+
+export async function exec(sql: string): Promise<void> {
+  const db = await driver();
+  await db.exec(sql);
+}
+
+export async function tx<T>(fn: (x: Executor) => Promise<T>): Promise<T> {
+  const db = await driver();
+  return db.transaction(fn);
+}

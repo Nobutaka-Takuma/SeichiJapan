@@ -6,7 +6,7 @@ import { getPassage, getPassageRevisions, type PassageRevision } from "@/lib/que
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const passage = getPassage(Number(id));
+  const passage = await getPassage(Number(id));
   return { title: passage ? `シーンの編集履歴｜${passage.work.title}` : "編集履歴" };
 }
 
@@ -29,10 +29,10 @@ export default async function PassageHistoryPage({ params }: { params: Promise<{
   const passageId = Number(id);
   if (!Number.isInteger(passageId)) notFound();
 
-  const passage = getPassage(passageId);
+  const passage = await getPassage(passageId);
   if (!passage) notFound();
 
-  const rows: HistoryRow[] = getPassageRevisions(passageId).map((r) => ({
+  const rows: HistoryRow[] = (await getPassageRevisions(passageId)).map((r) => ({
     id: r.id,
     editorHandle: r.editor_handle,
     editorName: r.editor_name,

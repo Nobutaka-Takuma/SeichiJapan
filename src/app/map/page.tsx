@@ -24,9 +24,9 @@ export default async function MapPage({
 }) {
   const { medium = "all", work: workSlug } = await searchParams;
   const user = await currentUser();
-  const works = listWorks();
+  const works = await listWorks();
   const work = workSlug ? works.find((w) => w.slug === workSlug) : undefined;
-  const pins = getPins({ medium, workId: work?.id });
+  const pins = await getPins({ medium, workId: work?.id });
 
   const mapPins: MapPin[] = pins.map((p) => ({
     id: p.identification_id,

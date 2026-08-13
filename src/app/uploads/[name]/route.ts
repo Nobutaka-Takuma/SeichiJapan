@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
-import { CONTENT_TYPES, UPLOAD_NAME_RE, uploadPath } from "@/lib/uploads";
+import { CONTENT_TYPES, UPLOAD_NAME_RE, localPath, publicUrl, usingSupabaseStorage } from "@/lib/uploads";
 
 /**
  * 投稿画像の配信。
+ *
+ * Supabase Storage を使っているときはそちらへ寄せる。
  * ファイル名は保存時に生成した形式のみ受け付ける（パスの細工を防ぐ）。
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ name: string }> }) {
@@ -12,8 +14,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ nam
     return new NextResponse("Not found", { status: 404 });
   }
 
+  if (usingSupabaseStorage()) {
+    return NextResponse.redirect(publicUrl(name), 308);
+  }
+
   try {
-    const data = await fs.readFile(uploadPath(name));
+    const data = await fs.readFile(localPath(name));
     const ext = name.split(".").pop()!;
     return new NextResponse(new Uint8Array(data), {
       headers: {

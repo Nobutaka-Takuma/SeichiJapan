@@ -12,7 +12,7 @@ import { EVIDENCE_LABEL, getComments, getPassage } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const passage = getPassage(Number(id));
+  const passage = await getPassage(Number(id));
   if (!passage) return { title: "記述が見つかりません" };
   const top = passage.candidates[0];
   return {
@@ -35,10 +35,10 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
   if (!Number.isInteger(passageId)) notFound();
 
   const user = await currentUser();
-  const passage = getPassage(passageId, user?.id);
+  const passage = await getPassage(passageId, user?.id);
   if (!passage) notFound();
 
-  const comments = getComments(passageId);
+  const comments = await getComments(passageId);
   const mapPins: MapPin[] = passage.candidates.map((c, i) => ({
     id: c.id,
     lat: c.lat,
