@@ -1,0 +1,477 @@
+import { db } from "./db";
+import { confidenceShares, consensusLevel, evidenceWeight, type ConsensusLevel } from "./confidence";
+
+export type Medium = "novel" | "anime" | "manga" | "film";
+
+export const MEDIUM_LABEL: Record<Medium, string> = {
+  novel: "小説",
+  anime: "アニメ",
+  manga: "漫画",
+  film: "映画",
+};
+
+export const EVIDENCE_LABEL: Record<string, string> = {
+  guess: "推測",
+  research: "調査にもとづく",
+  official: "公式・作中に明示",
+};
+
+export type Work = {
+  id: number;
+  slug: string;
+  title: string;
+  author: string;
+  medium: Medium;
+  year: number | null;
+  description: string;
+};
+
+export type WorkSummary = Work & {
+  place_count: number;
+  passage_count: number;
+  contributor_count: number;
+};
+
+export type Place = {
+  id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  prefecture: string;
+  address: string;
+  note: string;
+};
+
+export type Candidate = {
+  id: number;
+  place_id: number;
+  place_name: string;
+  lat: number;
+  lng: number;
+  prefecture: string;
+  rationale: string;
+  evidence: string;
+  source_url: string;
+  up: number;
+  down: number;
+  proposer: string;
+  proposer_handle: string;
+  created_at: string;
+  confidence: number;
+  my_vote: number;
+};
+
+export type PassageWithCandidates = {
+  id: number;
+  work_id: number;
+  chapter: string;
+  kind: "text" | "scene";
+  quote: string;
+  note: string;
+  created_at: string;
+  author_handle: string;
+  author_name: string;
+  candidates: Candidate[];
+  comment_count: number;
+  votes: number;
+  consensus: ConsensusLevel;
+};
+
+/** 候補に確度を付けて返す。viewerId を渡すとその人の投票状態も含む。 */
+function candidatesFor(passageIds: number[], viewerId?: number): Map<number, Candidate[]> {
+  const byPassage = new Map<number, Candidate[]>();
+  if (passageIds.length === 0) return byPassage;
+  const marks = passageIds.map(() => "?").join(",");
+
+  const rows = db
+    .prepare(
+      `SELECT i.id, i.passage_id, i.place_id, i.rationale, i.evidence, i.source_url, i.created_at,
+              pl.name AS place_name, pl.lat, pl.lng, pl.prefecture,
+              u.display_name AS proposer, u.handle AS proposer_handle,
+              COALESCE(SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END), 0) AS up,
+              COALESCE(SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END), 0) AS down,
+              COALESCE(MAX(CASE WHEN v.user_id = ? THEN v.value END), 0) AS my_vote
+         FROM identifications i
+         JOIN places pl ON pl.id = i.place_id
+         LEFT JOIN users u ON u.id = i.created_by
+         LEFT JOIN votes v ON v.identification_id = i.id
+        WHERE i.passage_id IN (${marks})
+        GROUP BY i.id
+        ORDER BY (up - down) DESC, i.created_at ASC`,
+    )
+    .all(viewerId ?? -1, ...passageIds) as (Omit<Candidate, "confidence"> & {
+    passage_id: number;
+  })[];
+
+  for (const r of rows) {
+    const list = byPassage.get(r.passage_id) ?? [];
+    list.push({ ...r, confidence: 0 });
+    byPassage.set(r.passage_id, list);
+  }
+  for (const list of byPassage.values()) {
+    const shares = confidenceShares(list.map((c) => ({ up: c.up, down: c.down })));
+    list.forEach((c, i) => (c.confidence = shares[i]));
+    list.sort((a, b) => b.confidence - a.confidence);
+  }
+  return byPassage;
+}
+
+function attachCandidates(
+  rows: Omit<PassageWithCandidates, "candidates" | "consensus" | "votes">[],
+  viewerId?: number,
+): PassageWithCandidates[] {
+  const map = candidatesFor(
+    rows.map((r) => r.id),
+    viewerId,
+  );
+  return rows.map((r) => {
+    const candidates = map.get(r.id) ?? [];
+    const votes = evidenceWeight(candidates.map((c) => ({ up: c.up, down: c.down })));
+    return {
+      ...r,
+      candidates,
+      votes,
+      consensus: consensusLevel(candidates.map((c) => c.confidence), votes),
+    };
+  });
+}
+
+const PASSAGE_COLUMNS = `p.id, p.work_id, p.chapter, p.kind, p.quote, p.note, p.created_at,
+       COALESCE(u.handle, '') AS author_handle, COALESCE(u.display_name, '退会したユーザー') AS author_name,
+       (SELECT COUNT(*) FROM comments c WHERE c.passage_id = p.id) AS comment_count`;
+
+export function listWorks(query?: string, medium?: string): WorkSummary[] {
+  const where: string[] = [];
+  const params: Record<string, string> = {};
+  if (query) {
+    where.push("(w.title LIKE @q OR w.author LIKE @q)");
+    params.q = `%${query}%`;
+  }
+  if (medium && medium !== "all") {
+    where.push("w.medium = @m");
+    params.m = medium;
+  }
+  return db
+    .prepare(
+      `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description,
+              (SELECT COUNT(DISTINCT i.place_id) FROM identifications i
+                 JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id) AS place_count,
+              (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS passage_count,
+              (SELECT COUNT(DISTINCT uid) FROM (
+                  SELECT p.created_by AS uid FROM passages p WHERE p.work_id = w.id
+                  UNION
+                  SELECT i.created_by FROM identifications i JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
+                  UNION
+                  SELECT v.user_id FROM votes v
+                    JOIN identifications i ON i.id = v.identification_id
+                    JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
+                  UNION
+                  SELECT c.user_id FROM comments c JOIN passages p ON p.id = c.passage_id WHERE p.work_id = w.id
+              ) WHERE uid IS NOT NULL) AS contributor_count
+         FROM works w
+         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+        ORDER BY place_count DESC, w.title ASC`,
+    )
+    .all(...(Object.keys(params).length ? [params] : [])) as WorkSummary[];
+}
+
+export function getWork(slug: string): WorkSummary | undefined {
+  const row = db.prepare("SELECT slug FROM works WHERE slug = ?").get(slug) as { slug: string } | undefined;
+  if (!row) return undefined;
+  return listWorks().find((w) => w.slug === slug);
+}
+
+export function getWorkPassages(workId: number, viewerId?: number): PassageWithCandidates[] {
+  const rows = db
+    .prepare(
+      `SELECT ${PASSAGE_COLUMNS}
+         FROM passages p LEFT JOIN users u ON u.id = p.created_by
+        WHERE p.work_id = ?
+        ORDER BY p.sort_order ASC, p.id ASC`,
+    )
+    .all(workId) as Omit<PassageWithCandidates, "candidates" | "consensus" | "votes">[];
+  return attachCandidates(rows, viewerId);
+}
+
+export function getPassage(id: number, viewerId?: number): (PassageWithCandidates & { work: Work }) | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${PASSAGE_COLUMNS}
+         FROM passages p LEFT JOIN users u ON u.id = p.created_by
+        WHERE p.id = ?`,
+    )
+    .get(id) as Omit<PassageWithCandidates, "candidates" | "consensus" | "votes"> | undefined;
+  if (!row) return undefined;
+  const work = db
+    .prepare("SELECT id, slug, title, author, medium, year, description FROM works WHERE id = ?")
+    .get(row.work_id) as Work;
+  return { ...attachCandidates([row], viewerId)[0], work };
+}
+
+export type CommentRow = {
+  id: number;
+  body: string;
+  created_at: string;
+  handle: string;
+  display_name: string;
+  identification_id: number | null;
+  place_name: string | null;
+};
+
+export function getComments(passageId: number): CommentRow[] {
+  return db
+    .prepare(
+      `SELECT c.id, c.body, c.created_at, c.identification_id,
+              u.handle, u.display_name,
+              pl.name AS place_name
+         FROM comments c
+         JOIN users u ON u.id = c.user_id
+         LEFT JOIN identifications i ON i.id = c.identification_id
+         LEFT JOIN places pl ON pl.id = i.place_id
+        WHERE c.passage_id = ?
+        ORDER BY c.created_at ASC, c.id ASC`,
+    )
+    .all(passageId) as CommentRow[];
+}
+
+export function getPlace(id: number): Place | undefined {
+  return db.prepare("SELECT id, name, lat, lng, prefecture, address, note FROM places WHERE id = ?").get(id) as
+    | Place
+    | undefined;
+}
+
+export type Appearance = {
+  passage_id: number;
+  quote: string;
+  kind: string;
+  chapter: string;
+  work_slug: string;
+  work_title: string;
+  work_author: string;
+  medium: Medium;
+  confidence: number;
+};
+
+/** ある場所が「どの作品のどの記述に出てくるとされているか」の逆引き。 */
+export function getAppearances(placeId: number): Appearance[] {
+  const rows = db
+    .prepare(
+      `SELECT i.passage_id, p.quote, p.kind, p.chapter, w.slug AS work_slug, w.title AS work_title,
+              w.author AS work_author, w.medium
+         FROM identifications i
+         JOIN passages p ON p.id = i.passage_id
+         JOIN works w ON w.id = p.work_id
+        WHERE i.place_id = ?`,
+    )
+    .all(placeId) as Omit<Appearance, "confidence">[];
+  const cands = candidatesFor(rows.map((r) => r.passage_id));
+  return rows
+    .map((r) => ({
+      ...r,
+      confidence: cands.get(r.passage_id)?.find((c) => c.place_id === placeId)?.confidence ?? 0,
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
+}
+
+export type Pin = {
+  identification_id: number;
+  passage_id: number;
+  place_id: number;
+  place_name: string;
+  lat: number;
+  lng: number;
+  prefecture: string;
+  quote: string;
+  kind: string;
+  chapter: string;
+  work_slug: string;
+  work_title: string;
+  medium: Medium;
+  confidence: number;
+  rank: number;
+};
+
+/** 地図に落とすピン。各記述の候補すべてを返し、rank=0 が最有力。 */
+export function getPins(opts: { workId?: number; medium?: string } = {}): Pin[] {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (opts.workId) {
+    where.push("p.work_id = @workId");
+    params.workId = opts.workId;
+  }
+  if (opts.medium && opts.medium !== "all") {
+    where.push("w.medium = @medium");
+    params.medium = opts.medium;
+  }
+  const rows = db
+    .prepare(
+      `SELECT i.id AS identification_id, i.passage_id, i.place_id, pl.name AS place_name,
+              pl.lat, pl.lng, pl.prefecture, p.quote, p.kind, p.chapter,
+              w.slug AS work_slug, w.title AS work_title, w.medium
+         FROM identifications i
+         JOIN places pl ON pl.id = i.place_id
+         JOIN passages p ON p.id = i.passage_id
+         JOIN works w ON w.id = p.work_id
+         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`,
+    )
+    .all(...(Object.keys(params).length ? [params] : [])) as Omit<Pin, "confidence" | "rank">[];
+
+  const cands = candidatesFor([...new Set(rows.map((r) => r.passage_id))]);
+  return rows
+    .map((r) => {
+      const list = cands.get(r.passage_id) ?? [];
+      const idx = list.findIndex((c) => c.id === r.identification_id);
+      return { ...r, confidence: idx >= 0 ? list[idx].confidence : 0, rank: idx < 0 ? 99 : idx };
+    })
+    .sort((a, b) => a.rank - b.rank);
+}
+
+export function searchPlaces(q: string, limit = 20): Place[] {
+  return db
+    .prepare(
+      `SELECT id, name, lat, lng, prefecture, address, note FROM places
+        WHERE name LIKE @q OR prefecture LIKE @q OR address LIKE @q
+        ORDER BY name LIMIT @limit`,
+    )
+    .all({ q: `%${q}%`, limit }) as Place[];
+}
+
+export function listPlaces(limit = 500): (Place & { work_count: number })[] {
+  return db
+    .prepare(
+      `SELECT pl.id, pl.name, pl.lat, pl.lng, pl.prefecture, pl.address, pl.note,
+              (SELECT COUNT(DISTINCT p.work_id) FROM identifications i
+                 JOIN passages p ON p.id = i.passage_id WHERE i.place_id = pl.id) AS work_count
+         FROM places pl
+        ORDER BY work_count DESC, pl.name ASC
+        LIMIT ?`,
+    )
+    .all(limit) as (Place & { work_count: number })[];
+}
+
+export type SiteStats = { works: number; places: number; passages: number; users: number; votes: number };
+
+export function siteStats(): SiteStats {
+  const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+  return {
+    works: one("SELECT COUNT(*) AS n FROM works"),
+    places: one("SELECT COUNT(*) AS n FROM places"),
+    passages: one("SELECT COUNT(*) AS n FROM passages"),
+    users: one("SELECT COUNT(*) AS n FROM users"),
+    votes: one("SELECT COUNT(*) AS n FROM votes"),
+  };
+}
+
+export type ActivityItem = {
+  kind: "identification" | "comment" | "passage";
+  created_at: string;
+  passage_id: number;
+  quote: string;
+  work_title: string;
+  work_slug: string;
+  actor: string;
+  actor_handle: string;
+  detail: string;
+};
+
+export function recentActivity(limit = 12): ActivityItem[] {
+  return db
+    .prepare(
+      `SELECT * FROM (
+         SELECT 'identification' AS kind, i.created_at, p.id AS passage_id, p.quote,
+                w.title AS work_title, w.slug AS work_slug,
+                COALESCE(u.display_name,'?') AS actor, COALESCE(u.handle,'') AS actor_handle,
+                pl.name AS detail
+           FROM identifications i
+           JOIN passages p ON p.id = i.passage_id
+           JOIN works w ON w.id = p.work_id
+           JOIN places pl ON pl.id = i.place_id
+           LEFT JOIN users u ON u.id = i.created_by
+         UNION ALL
+         SELECT 'comment', c.created_at, p.id, p.quote, w.title, w.slug,
+                u.display_name, u.handle, substr(c.body, 1, 80)
+           FROM comments c
+           JOIN passages p ON p.id = c.passage_id
+           JOIN works w ON w.id = p.work_id
+           JOIN users u ON u.id = c.user_id
+         UNION ALL
+         SELECT 'passage', p.created_at, p.id, p.quote, w.title, w.slug,
+                COALESCE(u.display_name,'?'), COALESCE(u.handle,''), p.chapter
+           FROM passages p
+           JOIN works w ON w.id = p.work_id
+           LEFT JOIN users u ON u.id = p.created_by
+       ) ORDER BY created_at DESC, passage_id DESC LIMIT ?`,
+    )
+    .all(limit) as ActivityItem[];
+}
+
+/** 議論が割れている記述（確度が拮抗しているもの）を拾う。 */
+export function contestedPassages(limit = 6): (PassageWithCandidates & { work_title: string; work_slug: string })[] {
+  const rows = db
+    .prepare(
+      `SELECT ${PASSAGE_COLUMNS}, w.title AS work_title, w.slug AS work_slug
+         FROM passages p
+         JOIN works w ON w.id = p.work_id
+         LEFT JOIN users u ON u.id = p.created_by
+        WHERE (SELECT COUNT(*) FROM identifications i WHERE i.passage_id = p.id) > 1`,
+    )
+    .all() as (Omit<PassageWithCandidates, "candidates" | "consensus" | "votes"> & {
+    work_title: string;
+    work_slug: string;
+  })[];
+
+  return attachCandidates(rows)
+    .map((p, i) => ({ ...p, work_title: rows[i].work_title, work_slug: rows[i].work_slug }))
+    .sort((a, b) => (a.candidates[0]?.confidence ?? 1) - (b.candidates[0]?.confidence ?? 1))
+    .slice(0, limit);
+}
+
+export type UserProfile = {
+  id: number;
+  handle: string;
+  display_name: string;
+  bio: string;
+  created_at: string;
+};
+
+export function getUserByHandle(handle: string): UserProfile | undefined {
+  return db
+    .prepare("SELECT id, handle, display_name, bio, created_at FROM users WHERE handle = ?")
+    .get(handle) as UserProfile | undefined;
+}
+
+export function getUserContributions(userId: number) {
+  const idents = db
+    .prepare(
+      `SELECT i.id, i.created_at, i.rationale, pl.name AS place_name, p.id AS passage_id, p.quote,
+              w.title AS work_title, w.slug AS work_slug
+         FROM identifications i
+         JOIN places pl ON pl.id = i.place_id
+         JOIN passages p ON p.id = i.passage_id
+         JOIN works w ON w.id = p.work_id
+        WHERE i.created_by = ? ORDER BY i.created_at DESC LIMIT 50`,
+    )
+    .all(userId) as {
+    id: number;
+    created_at: string;
+    rationale: string;
+    place_name: string;
+    passage_id: number;
+    quote: string;
+    work_title: string;
+    work_slug: string;
+  }[];
+
+  const comments = db
+    .prepare(
+      `SELECT c.id, c.body, c.created_at, p.id AS passage_id, p.quote, w.title AS work_title
+         FROM comments c
+         JOIN passages p ON p.id = c.passage_id
+         JOIN works w ON w.id = p.work_id
+        WHERE c.user_id = ? ORDER BY c.created_at DESC LIMIT 50`,
+    )
+    .all(userId) as { id: number; body: string; created_at: string; passage_id: number; quote: string; work_title: string }[];
+
+  const votes = (db.prepare("SELECT COUNT(*) AS n FROM votes WHERE user_id = ?").get(userId) as { n: number }).n;
+  return { idents, comments, votes };
+}
