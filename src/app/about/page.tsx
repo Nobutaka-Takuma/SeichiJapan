@@ -30,6 +30,11 @@ export default function AboutPage() {
           訪ねるときに何に気をつけるべきか。ひとつのページにまとめ、
           <strong className="font-bold text-ink">誰でも書き足せる</strong>ようにしています。
         </p>
+        <p className="leading-loose text-ink-2">
+          場所の解説だけでなく、<strong className="font-bold text-ink">シーンの記述そのもの</strong>
+          も誰でも直せます。話数の間違い、曖昧な場面の説明、差し替えたほうがいい画像。
+          気づいた人が直せば、それだけ地図帳の精度が上がります。
+        </p>
       </section>
 
       <section className="space-y-4">
@@ -63,9 +68,11 @@ export default function AboutPage() {
             </li>
             <li>
               <b className="text-ink">2.</b> 近くの場所から選ぶか、新しい場所として登録する
+              （すでにピンが立っている場所なら、そのピンを押すだけで選べます）
             </li>
             <li>
-              <b className="text-ink">3.</b> 作品と、そのシーンの説明を書く
+              <b className="text-ink">3.</b> 作品を選ぶ。入力すると候補が絞り込まれ、
+              一覧に無ければその場で新しい作品として登録できます
             </li>
             <li>
               <b className="text-ink">4.</b> 画像を添える。アニメなら場面の画像、小説なら本文の描写にあたるもの

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { MapView } from "@/components/MapView";
-import { Card, Empty, MediumBadge, PassageQuote } from "@/components/ui";
+import { Card, MediumBadge, PassageQuote } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
 import { getAppearances, getPlace } from "@/lib/queries";
 
@@ -175,15 +175,23 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
                 <span className="ml-2 text-xs font-normal text-ink-3">{appearances.length}件</span>
               </h2>
               <Link
-                href={`/map?place=${place.id}`}
+                href={`/scenes/new?place=${place.id}`}
                 className="rounded bg-shu px-3 py-1.5 text-xs font-bold text-paper hover:opacity-90"
               >
-                シーンを追加
+                ＋ シーンを追加
               </Link>
             </div>
 
             {appearances.length === 0 ? (
-              <Empty>この場所は、まだどのシーンとも結びついていません。</Empty>
+              <div className="rounded-md border border-dashed border-rule-2 px-4 py-6 text-center text-sm text-ink-3">
+                <p>この場所は、まだどのシーンとも結びついていません。</p>
+                <Link
+                  href={`/scenes/new?place=${place.id}`}
+                  className="mt-2 inline-block font-bold text-shu hover:underline"
+                >
+                  最初のシーンを登録する →
+                </Link>
+              </div>
             ) : (
               <ol className="space-y-4">
                 {appearances.map((a) => (
@@ -191,12 +199,16 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
                     <Card className="overflow-hidden">
                       {a.image_path && (
                         <figure>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={a.image_path}
-                            alt={a.image_caption || a.work_title}
-                            className="h-56 w-full object-cover"
-                          />
+                          <a href={a.image_path} target="_blank" rel="noopener noreferrer" title="画像を開く">
+                            {/* 利用者が投稿した画像。サイズが不定なので next/image は使わない */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={a.image_path}
+                              alt={a.image_caption || `${a.work_title}のシーン`}
+                              loading="lazy"
+                              className="h-56 w-full object-cover"
+                            />
+                          </a>
                           {(a.image_caption || a.image_credit) && (
                             <figcaption className="border-b border-rule bg-paper-2/50 px-4 py-1.5 text-[11px] text-ink-3">
                               {a.image_caption}
@@ -221,6 +233,13 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
                               異説あり・確度 {Math.round(a.confidence * 100)}%
                             </Link>
                           )}
+                          <Link
+                            href={`/passages/${a.passage_id}/edit`}
+                            className="ml-auto shrink-0 hover:text-shu"
+                            title="このシーンの記述を直す"
+                          >
+                            編集
+                          </Link>
                         </div>
                         <Link href={`/passages/${a.passage_id}`} className="group mt-2 block">
                           <PassageQuote kind={a.kind} quote={a.quote} className="group-hover:text-shu" />

@@ -2,23 +2,24 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { addSceneAction, type FormState } from "@/app/actions";
 import { MapView, type MapPin } from "./MapView";
+import { SceneFields } from "./SceneFields";
+import { WorkCombobox } from "./WorkCombobox";
 
 type NearbyPlace = { id: number; name: string; prefecture: string; address: string; distance_m: number };
-type WorkOption = { id: number; title: string; author: string; medium: string };
 
 const field = "w-full rounded border border-rule-2 bg-card px-3 py-2 text-sm outline-none focus:border-shu";
 
+const distance = (m: number) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`);
+
 export function MapContribute({
   pins,
-  works,
   loggedIn,
   height = 620,
 }: {
   pins: MapPin[];
-  works: WorkOption[];
   loggedIn: boolean;
   height?: number;
 }) {
@@ -27,9 +28,8 @@ export function MapContribute({
   const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
   const [nearby, setNearby] = useState<NearbyPlace[]>([]);
   const [target, setTarget] = useState<NearbyPlace | "new" | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [kind, setKind] = useState<"scene" | "text">("scene");
   const [state, action, pending] = useActionState<FormState & { placeId?: number }, FormData>(addSceneAction, {});
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // 地点が決まったら、近くの登録済みの場所を引く
   useEffect(() => {
@@ -37,8 +37,16 @@ export function MapContribute({
     setTarget(null);
     fetch(`/api/places/nearby?lat=${picked.lat}&lng=${picked.lng}`)
       .then((r) => r.json())
-      .then((d) => setNearby(d.places ?? []))
+      .then((d) => {
+        const list: NearbyPlace[] = d.places ?? [];
+        setNearby(list);
+        // すぐ隣に既存の場所があるなら、それを最初から選んでおく
+        if (list[0] && list[0].distance_m < 80) setTarget(list[0]);
+        else if (list.length === 0) setTarget("new");
+      })
       .catch(() => setNearby([]));
+    // 縦並びになる画面では、フォームが画面外に出てしまうので送る
+    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [picked]);
 
   useEffect(() => {
@@ -49,11 +57,10 @@ export function MapContribute({
     setPicking(false);
     setPicked(null);
     setTarget(null);
-    setPreview(null);
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_360px] lg:items-start">
+    <div className="grid gap-4 lg:grid-cols-[1fr_380px] lg:items-start">
       <div className="overflow-hidden rounded-lg border border-rule bg-card">
         <div className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-2.5">
           {loggedIn ? (
@@ -88,21 +95,20 @@ export function MapContribute({
       </div>
 
       {/* 書き込みパネル */}
-      <div className="lg:sticky lg:top-20">
+      <div ref={panelRef} className="scroll-mt-20 lg:sticky lg:top-20">
         {!picked ? (
           <div className="rounded-lg border border-dashed border-rule-2 p-6 text-sm leading-relaxed text-ink-3">
             <p className="font-bold text-ink-2">地図からの書き込みについて</p>
             <p className="mt-2">
               作品ページを開かなくても、地図の上で場所をクリックするだけで
-              「ここは○○のこのシーン」を登録できます。アニメならその場面の画像、
-              小説なら本文の描写を添えてください。
+              「ここは○○のこのシーン」を登録できます。
             </p>
             <p className="mt-2">
               同じ場所がすでに登録されていれば、その項目にシーンが積み重なっていきます。
             </p>
           </div>
         ) : (
-          <form action={action} className="space-y-4 rounded-lg border border-rule bg-card p-5">
+          <form action={action} className="space-y-5 rounded-lg border border-rule bg-card p-5">
             <input type="hidden" name="lat" value={picked.lat} />
             <input type="hidden" name="lng" value={picked.lng} />
 
@@ -112,11 +118,11 @@ export function MapContribute({
                 取り消す
               </button>
             </div>
-            <p className="-mt-2 text-[11px] tabular-nums text-ink-3">
+            <p className="-mt-3 text-[11px] tabular-nums text-ink-3">
               {picked.lat}, {picked.lng}（ピンをドラッグで微調整）
             </p>
 
-            {/* 場所を決める */}
+            {/* 場所 */}
             <div>
               <span className="text-xs font-bold text-ink-2">場所</span>
               <div className="mt-1.5 space-y-1.5">
@@ -125,6 +131,7 @@ export function MapContribute({
                     key={p.id}
                     type="button"
                     onClick={() => setTarget(p)}
+                    aria-pressed={target !== "new" && target?.id === p.id}
                     className={`flex w-full items-center gap-2 rounded border px-3 py-2 text-left text-sm ${
                       target !== "new" && target?.id === p.id
                         ? "border-shu bg-shu-soft/50"
@@ -132,14 +139,13 @@ export function MapContribute({
                     }`}
                   >
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                    <span className="shrink-0 text-[11px] text-ink-3">
-                      {p.distance_m < 1000 ? `${p.distance_m}m` : `${(p.distance_m / 1000).toFixed(1)}km`}
-                    </span>
+                    <span className="shrink-0 text-[11px] text-ink-3">{distance(p.distance_m)}</span>
                   </button>
                 ))}
                 <button
                   type="button"
                   onClick={() => setTarget("new")}
+                  aria-pressed={target === "new"}
                   className={`w-full rounded border px-3 py-2 text-left text-sm ${
                     target === "new" ? "border-shu bg-shu-soft/50" : "border-dashed border-rule-2 hover:border-shu"
                   }`}
@@ -161,93 +167,19 @@ export function MapContribute({
             )}
             {target && target !== "new" && <input type="hidden" name="place_id" value={target.id} />}
 
-            {/* 作品とシーン */}
-            <label className="block">
+            {/* 作品 */}
+            <div>
               <span className="text-xs font-bold text-ink-2">作品 *</span>
-              <select name="work_id" required defaultValue="" className={`${field} mt-1`}>
-                <option value="" disabled>
-                  作品を選ぶ
-                </option>
-                {works.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.title}（{w.author}）
-                  </option>
-                ))}
-              </select>
-              <Link href="/works/new" className="mt-1 inline-block text-[11px] text-ink-3 hover:text-shu">
-                作品が一覧にない場合は追加 →
-              </Link>
-            </label>
-
-            <div className="flex gap-1">
-              {(
-                [
-                  ["scene", "場面の記述"],
-                  ["text", "本文引用"],
-                ] as const
-              ).map(([k, label]) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setKind(k)}
-                  className={`rounded-full px-3 py-1 text-[11px] font-bold ${
-                    kind === k ? "bg-ink text-paper" : "border border-rule-2 text-ink-2 hover:border-shu"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-              <input type="hidden" name="kind" value={kind} />
+              <div className="mt-1.5">
+                <WorkCombobox />
+              </div>
             </div>
 
-            <label className="block">
-              <span className="text-xs font-bold text-ink-2">{kind === "text" ? "本文 *" : "シーンの説明 *"}</span>
-              <textarea
-                name="quote"
-                rows={3}
-                required
-                minLength={5}
-                placeholder={
-                  kind === "text"
-                    ? "彼は駅を出て、坂を下り、海の見える喫茶店に入った。"
-                    : "千歌たちが部員募集のビラを配る、駅前のロータリー。"
-                }
-                className={`${field} mt-1 resize-y leading-relaxed`}
-              />
-            </label>
-
-            <input name="chapter" placeholder="章・話数（例：第3話 / 上・二）" className={field} />
-
-            {/* 画像 */}
-            <div className="space-y-2">
-              <label className="block">
-                <span className="text-xs font-bold text-ink-2">シーンの画像</span>
-                <input
-                  type="file"
-                  name="image"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    setPreview(f ? URL.createObjectURL(f) : null);
-                  }}
-                  className="mt-1 block w-full text-xs text-ink-2 file:mr-3 file:rounded file:border-0 file:bg-paper-2 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink-2"
-                />
-              </label>
-              {preview && (
-                // プレビューはローカルのblob URLなので next/image は使わない
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={preview} alt="" className="h-32 w-full rounded object-cover" />
-              )}
-              <input name="image_caption" placeholder="画像の説明（任意）" className={field} />
-              <input name="image_credit" placeholder="撮影者・出典（任意）" className={field} />
-              <p className="text-[11px] leading-relaxed text-ink-3">
-                自分で撮影した現地写真を推奨します。作品の映像・挿絵は権利者のものです。
-                引用の範囲を超える転載は避けてください。
-              </p>
-            </div>
+            {/* シーン */}
+            <SceneFields compact />
 
             <label className="block">
-              <span className="text-xs font-bold text-ink-2">補足・根拠（任意）</span>
+              <span className="text-xs font-bold text-ink-2">根拠・補足（任意）</span>
               <textarea
                 name="rationale"
                 rows={2}

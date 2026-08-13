@@ -17,10 +17,20 @@ const SORTS = [
   { key: "name", label: "名前順" },
 ] as const;
 
-export default async function PlacesPage({ searchParams }: { searchParams: Promise<{ sort?: string }> }) {
-  const { sort = "likes" } = await searchParams;
+export default async function PlacesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string; q?: string }>;
+}) {
+  const { sort = "likes", q = "" } = await searchParams;
   const key = (SORTS.find((s) => s.key === sort)?.key ?? "likes") as "likes" | "works" | "name";
-  const places = listPlaces(500, key);
+  const all = listPlaces(500, key);
+  const term = q.trim();
+  const places = term
+    ? all.filter((p) =>
+        [p.name, p.prefecture, p.address, p.note].some((v) => v?.includes(term)),
+      )
+    : all;
   const user = await currentUser();
 
   const likedIds = new Set(
@@ -37,7 +47,8 @@ export default async function PlacesPage({ searchParams }: { searchParams: Promi
         <div>
           <h1 className="font-serif text-2xl font-bold tracking-wide">場所一覧</h1>
           <p className="mt-1 text-sm text-ink-3">
-            {places.length}件。ひとつの場所に複数の作品が重なることがあります。
+            {term ? `「${term}」の検索結果 ${places.length}件` : `${places.length}件`}
+            。ひとつの場所に複数の作品が重なることがあります。
           </p>
         </div>
         <Link href="/map" className="rounded bg-shu px-4 py-2 text-sm font-bold text-paper hover:opacity-90">
@@ -45,22 +56,42 @@ export default async function PlacesPage({ searchParams }: { searchParams: Promi
         </Link>
       </div>
 
-      <div className="flex gap-1">
-        {SORTS.map((s) => (
-          <Link
-            key={s.key}
-            href={`/places?sort=${s.key}`}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-              key === s.key ? "bg-ink text-paper" : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
-            }`}
+      <div className="flex flex-wrap items-center gap-3">
+        <form className="flex gap-2">
+          <input
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="場所名・都道府県で検索"
+            className="w-56 rounded border border-rule-2 bg-card px-3 py-2 text-sm outline-none focus:border-shu"
+          />
+          <input type="hidden" name="sort" value={key} />
+          <button
+            type="submit"
+            className="rounded border border-rule-2 px-3 py-2 text-xs font-bold text-ink-2 hover:border-shu hover:text-shu"
           >
-            {s.label}
-          </Link>
-        ))}
+            検索
+          </button>
+        </form>
+        <div className="flex gap-1">
+          {SORTS.map((s) => (
+            <Link
+              key={s.key}
+              href={`/places?${new URLSearchParams({ ...(term ? { q: term } : {}), sort: s.key })}`}
+              className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                key === s.key ? "bg-ink text-paper" : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
+              }`}
+            >
+              {s.label}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {places.length === 0 ? (
-        <Empty>まだ場所が登録されていません。</Empty>
+        <Empty>
+          {term ? `「${term}」に一致する場所はありません。` : "まだ場所が登録されていません。"}
+        </Empty>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {places.map((p) => (

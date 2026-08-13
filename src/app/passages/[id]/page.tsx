@@ -72,7 +72,15 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
             {passage.kind === "text" ? "本文引用" : "場面の記述"}
           </span>
           <ConsensusBadge level={passage.consensus} />
-          <span>{passage.votes}票</span>
+          {passage.candidates.length > 1 && <span>{passage.votes}票</span>}
+          <span className="ml-auto flex items-center gap-3">
+            <Link href={`/passages/${passage.id}/edit`} className="font-bold hover:text-shu">
+              編集
+            </Link>
+            <Link href={`/passages/${passage.id}/history`} className="hover:text-shu">
+              履歴{passage.revision_count > 0 && `（${passage.revision_count}）`}
+            </Link>
+          </span>
         </div>
         <div className="mt-3 text-xl sm:text-2xl">
           <PassageQuote kind={passage.kind} quote={passage.quote} />
@@ -109,6 +117,18 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
           ) : (
             passage.author_name
           )}
+          {passage.updated_at && passage.editor_name && (
+            <>
+              　最終更新：{passage.updated_at.slice(0, 10)}・
+              {passage.editor_handle ? (
+                <Link href={`/users/${passage.editor_handle}`} className="hover:text-shu">
+                  {passage.editor_name}
+                </Link>
+              ) : (
+                passage.editor_name
+              )}
+            </>
+          )}
         </p>
       </header>
 
@@ -117,8 +137,10 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
         <section className="space-y-4">
           <div className="flex items-baseline justify-between border-b border-rule pb-2">
             <h2 className="font-serif text-lg font-bold tracking-wide">
-              比定の候補
-              <span className="ml-2 text-xs font-normal text-ink-3">{passage.candidates.length}件</span>
+              {passage.candidates.length > 1 ? "比定の候補" : "この場所"}
+              {passage.candidates.length > 1 && (
+                <span className="ml-2 text-xs font-normal text-ink-3">{passage.candidates.length}件</span>
+              )}
             </h2>
             <span className="text-xs text-ink-3">{CONSENSUS_LABEL[passage.consensus]}</span>
           </div>

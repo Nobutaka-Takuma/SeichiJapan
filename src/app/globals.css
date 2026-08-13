@@ -103,6 +103,16 @@ a {
 .seichi-pin--disputed {
   border-style: dashed;
 }
+/* 書き込み中は、ピンの上でも「ここを選ぶ」ことが分かるようにする */
+.seichi-map--picking .leaflet-interactive,
+.seichi-map--picking .seichi-pin {
+  cursor: crosshair;
+}
+.seichi-map--picking .seichi-pin:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 5px rgba(63, 95, 122, 0.25);
+}
+
 .seichi-pin--pick {
   font-size: 11px;
   box-shadow: 0 0 0 6px rgba(63, 95, 122, 0.22);

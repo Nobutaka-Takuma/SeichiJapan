@@ -187,7 +187,138 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
   return { ok: "差し戻しました" };
 }
 
-/* ---------- 地図からのシーン投稿 ---------- */
+/* ---------- シーンの共同編集 ---------- */
+
+function snapshotPassage(passageId: number, editorId: number | null, summary: string) {
+  db.prepare(
+    `INSERT INTO passage_revisions
+       (passage_id, editor_id, chapter, kind, quote, note, image_path, image_caption, image_credit, summary)
+     SELECT id, @editor, chapter, kind, quote, note, image_path, image_caption, image_credit, @summary
+       FROM passages WHERE id = @passage`,
+  ).run({ passage: passageId, editor: editorId, summary });
+}
+
+export async function editPassageAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const user = await currentUser();
+  if (!user) return { error: "編集するにはログインが必要です" };
+
+  const passageId = Number(fd.get("passage_id"));
+  const current = db.prepare("SELECT id, image_path, work_id FROM passages WHERE id = ?").get(passageId) as
+    | { id: number; image_path: string; work_id: number }
+    | undefined;
+  if (!current) return { error: "シーンが見つかりません" };
+
+  const quote = str(fd, "quote");
+  if (quote.length < 5) return { error: "本文または場面の記述を5文字以上で書いてください" };
+
+  try {
+    let image = current.image_path;
+    if (str(fd, "remove_image") === "1") image = "";
+    const uploaded = await saveImage(fd.get("image"));
+    if (uploaded) image = uploaded;
+
+    db.prepare(
+      `UPDATE passages
+          SET chapter = @chapter, kind = @kind, quote = @quote, note = @note,
+              image_path = @image, image_caption = @caption, image_credit = @credit,
+              updated_at = datetime('now'), updated_by = @user
+        WHERE id = @id`,
+    ).run({
+      id: passageId,
+      chapter: str(fd, "chapter"),
+      kind: str(fd, "kind") || "scene",
+      quote,
+      note: str(fd, "note"),
+      image,
+      caption: str(fd, "image_caption"),
+      credit: str(fd, "image_credit"),
+      user: user.id,
+    });
+
+    snapshotPassage(passageId, user.id, str(fd, "summary"));
+  } catch (e) {
+    if (e instanceof UploadError) return { error: e.message };
+    return fail(e);
+  }
+
+  revalidatePath(`/passages/${passageId}`);
+  revalidatePath("/map");
+  redirect(`/passages/${passageId}`);
+}
+
+export async function revertPassageAction(revisionId: number): Promise<FormState> {
+  const user = await currentUser();
+  if (!user) return { error: "差し戻すにはログインが必要です" };
+
+  const rev = db.prepare("SELECT * FROM passage_revisions WHERE id = ?").get(revisionId) as
+    | {
+        id: number;
+        passage_id: number;
+        chapter: string;
+        kind: string;
+        quote: string;
+        note: string;
+        image_path: string;
+        image_caption: string;
+        image_credit: string;
+      }
+    | undefined;
+  if (!rev) return { error: "指定された版が見つかりません" };
+
+  try {
+    db.prepare(
+      `UPDATE passages
+          SET chapter = @chapter, kind = @kind, quote = @quote, note = @note,
+              image_path = @image_path, image_caption = @image_caption, image_credit = @image_credit,
+              updated_at = datetime('now'), updated_by = @user
+        WHERE id = @id`,
+    ).run({ ...rev, id: rev.passage_id, user: user.id });
+    snapshotPassage(rev.passage_id, user.id, `#${rev.id} の版へ差し戻し`);
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath(`/passages/${rev.passage_id}`);
+  revalidatePath(`/passages/${rev.passage_id}/history`);
+  return { ok: "差し戻しました" };
+}
+
+/* ---------- 地図・場所からのシーン投稿 ---------- */
+
+/**
+ * フォームで選ばれた作品を返す。一覧になければ、その場で作品を作る。
+ * 作品数が増えるほど「先に作品を登録してから出直す」導線は負担になるため。
+ */
+function resolveWork(fd: FormData, userId: number): { id: number; slug: string } | { error: string } {
+  const workId = Number(fd.get("work_id")) || 0;
+  if (workId) {
+    const work = db.prepare("SELECT id, slug FROM works WHERE id = ?").get(workId) as
+      | { id: number; slug: string }
+      | undefined;
+    return work ?? { error: "選ばれた作品が見つかりません" };
+  }
+
+  const title = str(fd, "new_work_title");
+  if (!title) return { error: "作品を選ぶか、新しい作品名を入力してください" };
+  const author = str(fd, "new_work_author");
+  if (!author) return { error: "新しい作品を登録するには、作者・制作も入力してください" };
+
+  const existing = db.prepare("SELECT id, slug FROM works WHERE title = ? AND author = ?").get(title, author) as
+    | { id: number; slug: string }
+    | undefined;
+  if (existing) return existing;
+
+  const slug = makeSlug("", title);
+  db.prepare("INSERT INTO works (slug, title, author, medium, created_by) VALUES (?, ?, ?, ?, ?)").run(
+    slug,
+    title,
+    author,
+    str(fd, "new_work_medium") || "anime",
+    userId,
+  );
+  const created = db.prepare("SELECT id, slug FROM works WHERE slug = ?").get(slug) as { id: number; slug: string };
+  return created;
+}
 
 /**
  * 「ここは○○のあのシーンの場所」を一度に登録する。
@@ -197,18 +328,18 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
   const user = await currentUser();
   if (!user) return { error: "投稿するにはログインが必要です" };
 
-  const workId = Number(fd.get("work_id"));
-  const work = db.prepare("SELECT id, slug FROM works WHERE id = ?").get(workId) as
-    | { id: number; slug: string }
-    | undefined;
-  if (!work) return { error: "作品を選んでください" };
-
   const quote = str(fd, "quote");
   if (quote.length < 5) return { error: "シーンの説明を5文字以上で書いてください" };
 
   let placeId = Number(fd.get("place_id")) || 0;
+  let workSlug = "";
 
   try {
+    const resolved = resolveWork(fd, user.id);
+    if ("error" in resolved) return { error: resolved.error };
+    const work = resolved;
+    workSlug = work.slug;
+
     if (!placeId) {
       const name = str(fd, "place_name");
       const lat = Number(fd.get("lat"));
@@ -254,6 +385,8 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
         str(fd, "image_credit"),
       ).lastInsertRowid as number;
 
+    snapshotPassage(passageId, user.id, "新規作成");
+
     const identId = db
       .prepare(
         `INSERT INTO identifications (passage_id, place_id, rationale, evidence, created_by)
@@ -272,7 +405,7 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
   }
 
   revalidatePath(`/places/${placeId}`);
-  revalidatePath(`/works/${work.slug}`);
+  revalidatePath(`/works/${workSlug}`);
   revalidatePath("/map");
   revalidatePath("/");
   return { ok: "登録しました", placeId };
@@ -393,41 +526,6 @@ export async function addCommentAction(_prev: FormState, fd: FormData): Promise<
   }
   revalidatePath(`/passages/${passageId}`);
   return { ok: "投稿しました" };
-}
-
-/* ---------- 記述の追加 ---------- */
-
-export async function addPassageAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "投稿するにはログインが必要です" };
-
-  const slug = str(fd, "work_slug");
-  const work = db.prepare("SELECT id FROM works WHERE slug = ?").get(slug) as { id: number } | undefined;
-  if (!work) return { error: "作品が見つかりません" };
-
-  const quote = str(fd, "quote");
-  if (quote.length < 5) return { error: "本文または場面の記述を入力してください" };
-
-  let passageId: number;
-  try {
-    const order = (
-      db.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM passages WHERE work_id = ?").get(work.id) as {
-        n: number;
-      }
-    ).n;
-    passageId = db
-      .prepare(
-        `INSERT INTO passages (work_id, chapter, kind, quote, note, sort_order, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(work.id, str(fd, "chapter"), str(fd, "kind") || "scene", quote, str(fd, "note"), order, user.id)
-      .lastInsertRowid as number;
-  } catch (e) {
-    return fail(e);
-  }
-
-  revalidatePath(`/works/${slug}`);
-  redirect(`/passages/${passageId}`);
 }
 
 /* ---------- 作品の追加 ---------- */

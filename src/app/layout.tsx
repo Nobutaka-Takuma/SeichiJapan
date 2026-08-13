@@ -46,7 +46,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="ml-auto flex items-center gap-3 text-sm">
               {user ? (
                 <>
-                  <Link href={`/users/${user.handle}`} className="text-ink-2 hover:text-shu">
+                  <Link
+                    href="/scenes/new"
+                    className="rounded bg-shu px-3 py-1.5 text-xs font-bold text-paper hover:opacity-90"
+                  >
+                    ＋ 書き込む
+                  </Link>
+                  <Link href={`/users/${user.handle}`} className="hidden text-ink-2 hover:text-shu sm:inline">
                     {user.display_name}
                   </Link>
                   <form action={logoutAction}>

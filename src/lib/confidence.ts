@@ -40,13 +40,11 @@ export type ConsensusLevel = "settled" | "leading" | "contested" | "open";
 
 export function consensusLevel(shares: number[], votes: number): ConsensusLevel {
   if (shares.length === 0) return "open";
+  // 「定説」は異説がひとつも出ていないときだけ。
+  // 支持が偏っていても、対立する説がある以上は決着とは呼ばない。
   if (shares.length === 1) return "settled";
-  // 異説は出ているが、まだ誰も検証していない段階
   if (votes < 2) return "open";
-  const top = Math.max(...shares);
-  if (top >= 0.8) return "settled";
-  if (top >= 0.55) return "leading";
-  return "contested";
+  return Math.max(...shares) >= 0.55 ? "leading" : "contested";
 }
 
 export const CONSENSUS_LABEL: Record<ConsensusLevel, string> = {

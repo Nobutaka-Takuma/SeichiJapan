@@ -31,11 +31,14 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
     lat: p.lat,
     lng: p.lng,
     title: p.place_name,
-    subtitle: p.rank === 0 ? "最有力の説" : "対立する説",
+    subtitle: p.disputed ? (p.rank === 0 ? "最有力の説" : "対立する説") : work.title,
     quote: p.quote.length > 60 ? `${p.quote.slice(0, 60)}…` : p.quote,
     confidence: p.confidence,
     primary: p.rank === 0,
-    href: `/passages/${p.passage_id}`,
+    disputed: p.disputed,
+    likes: p.likes,
+    image: p.image_path || undefined,
+    href: `/places/${p.place_id}`,
   }));
 
   const settled = passages.filter((p) => p.consensus === "settled").length;
@@ -63,7 +66,7 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
         </div>
         <dl className="flex gap-7 border-t border-rule pt-4 lg:border-none lg:pt-0">
           <Stat label="登場する場所" value={work.place_count} unit="件" />
-          <Stat label="登録された記述" value={work.passage_count} unit="件" />
+          <Stat label="登録されたシーン" value={work.passage_count} unit="件" />
           <Stat label="参加ユーザー" value={work.contributor_count} unit="人" />
         </dl>
       </header>
@@ -71,34 +74,40 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
       <Card className="overflow-hidden">
         {mapPins.length === 0 ? (
           <div className="p-10">
-            <Empty>まだ地図に落とせる場所がありません。最初の記述を登録してみてください。</Empty>
+            <Empty>まだ地図に落とせる場所がありません。最初のシーンを登録してみてください。</Empty>
           </div>
         ) : (
           <MapView pins={mapPins} height={520} />
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule px-4 py-2.5 text-[11px] text-ink-3">
-          <span>
-            大きいピン＝各記述の最有力の説／小さい点線のピン＝対立する説
-          </span>
+          <span>ピンをクリックすると、その場所の項目へ移動します</span>
           <span className="ml-auto">
-            ほぼ確定 {settled}件・検証待ち／議論中 {contested}件
+            定説 {settled}件{contested > 0 && `・異説あり／検証待ち ${contested}件`}
           </span>
         </div>
       </Card>
 
       <section>
         <div className="mb-3 flex items-center justify-between border-b border-rule pb-2">
-          <h2 className="font-serif text-lg font-bold tracking-wide">この作品の記述と、その比定</h2>
+          <h2 className="font-serif text-lg font-bold tracking-wide">この作品のシーンと、その場所</h2>
           <Link
-            href={`/works/${work.slug}/passages/new`}
+            href={`/scenes/new?work=${encodeURIComponent(work.slug)}`}
             className="rounded bg-shu px-3 py-1.5 text-xs font-bold text-paper hover:opacity-90"
           >
-            記述を追加
+            ＋ シーンを追加
           </Link>
         </div>
 
         {passages.length === 0 ? (
-          <Empty>まだ記述が登録されていません。</Empty>
+          <div className="rounded-md border border-dashed border-rule-2 px-4 py-6 text-center text-sm text-ink-3">
+            <p>まだシーンが登録されていません。</p>
+            <Link
+              href={`/scenes/new?work=${encodeURIComponent(work.slug)}`}
+              className="mt-2 inline-block font-bold text-shu hover:underline"
+            >
+              最初のシーンを登録する →
+            </Link>
+          </div>
         ) : (
           <ol className="space-y-3">
             {passages.map((p, i) => (
@@ -111,7 +120,9 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
                       {p.kind === "text" ? "本文引用" : "場面の記述"}
                     </span>
                     <ConsensusBadge level={p.consensus} />
-                    <span className="ml-auto">{p.votes}票・{p.comment_count}コメント</span>
+                    <Link href={`/passages/${p.id}/edit`} className="ml-auto hover:text-shu">
+                      編集
+                    </Link>
                   </div>
 
                   <div className="mt-3 flex gap-4">

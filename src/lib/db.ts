@@ -117,6 +117,23 @@ CREATE TABLE IF NOT EXISTS place_revisions (
 );
 CREATE INDEX IF NOT EXISTS idx_revisions_place ON place_revisions(place_id, id DESC);
 
+-- シーンの版。場所と同じく、誰でも直せて履歴が残る。
+CREATE TABLE IF NOT EXISTS passage_revisions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  passage_id    INTEGER NOT NULL REFERENCES passages(id) ON DELETE CASCADE,
+  editor_id     INTEGER REFERENCES users(id),
+  chapter       TEXT NOT NULL DEFAULT '',
+  kind          TEXT NOT NULL DEFAULT 'scene',
+  quote         TEXT NOT NULL,
+  note          TEXT NOT NULL DEFAULT '',
+  image_path    TEXT NOT NULL DEFAULT '',
+  image_caption TEXT NOT NULL DEFAULT '',
+  image_credit  TEXT NOT NULL DEFAULT '',
+  summary       TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_prev_passage ON passage_revisions(passage_id, id DESC);
+
 -- 場所への「いいね」
 CREATE TABLE IF NOT EXISTS place_likes (
   place_id   INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
@@ -151,6 +168,8 @@ function migrate(db: Database.Database) {
   add("passages", "image_path", "TEXT NOT NULL DEFAULT ''");
   add("passages", "image_caption", "TEXT NOT NULL DEFAULT ''");
   add("passages", "image_credit", "TEXT NOT NULL DEFAULT ''");
+  add("passages", "updated_at", "TEXT");
+  add("passages", "updated_by", "INTEGER REFERENCES users(id)");
 }
 
 declare global {

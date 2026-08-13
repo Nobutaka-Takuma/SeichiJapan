@@ -101,6 +101,7 @@ export function MapView({
   const mapRef = useRef<LType.Map | null>(null);
   const layerRef = useRef<LType.LayerGroup | null>(null);
   const pickRef = useRef<LType.Marker | null>(null);
+  const fittedRef = useRef<string>("");
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
   const pickingRef = useRef(picking);
@@ -156,16 +157,32 @@ export function MapView({
     const latlngs: LType.LatLngExpression[] = [];
     // 確度の低いものを先に描き、高いものを前面に置く
     for (const pin of [...pins].sort((a, b) => Number(a.primary) - Number(b.primary))) {
-      L.marker([pin.lat, pin.lng], { icon: pinIcon(L, pin), zIndexOffset: pin.primary ? 500 : 0 })
-        .bindPopup(popupHtml(pin))
-        .addTo(layer);
+      const marker = L.marker([pin.lat, pin.lng], {
+        icon: pinIcon(L, pin),
+        zIndexOffset: pin.primary ? 500 : 0,
+      });
+      if (picking) {
+        // 書き込み中は、既存のピンを押したら「その場所」を選んだことにする。
+        // 同じ場所に別のシーンを足す操作がいちばん多いため。
+        marker.on("click", () => onPickRef.current?.({ lat: pin.lat, lng: pin.lng }));
+      } else {
+        marker.bindPopup(popupHtml(pin));
+      }
+      marker.addTo(layer);
       latlngs.push([pin.lat, pin.lng]);
     }
-    if (fit && latlngs.length > 0) {
-      const bounds = L.latLngBounds(latlngs);
-      map.fitBounds(bounds, { padding: [44, 44], maxZoom: latlngs.length === 1 ? 15 : 13 });
+
+    // 同じピンの並びに対して二度は寄せ直さない。
+    // 書き込みモードの切り替えで表示位置が飛ぶのを防ぐ。
+    const signature = pins.map((p) => p.id).join(",");
+    if (fit && latlngs.length > 0 && fittedRef.current !== signature) {
+      map.fitBounds(L.latLngBounds(latlngs), {
+        padding: [44, 44],
+        maxZoom: latlngs.length === 1 ? 15 : 13,
+      });
+      fittedRef.current = signature;
     }
-  }, [leaflet, pins, fit]);
+  }, [leaflet, pins, fit, picking]);
 
   // 選択中の地点を示すピン
   useEffect(() => {
@@ -198,7 +215,7 @@ export function MapView({
   return (
     <div
       ref={ref}
-      className={className}
+      className={`${className} ${picking ? "seichi-map--picking" : ""}`}
       style={{
         height: typeof height === "number" ? `${height}px` : height,
         width: "100%",

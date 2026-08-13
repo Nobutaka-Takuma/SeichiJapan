@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { MapContribute } from "@/components/MapContribute";
 import type { MapPin } from "@/components/MapView";
+import { WorkFilterSelect } from "@/components/WorkFilterSelect";
 import { Card, Empty } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
 import { MEDIUM_LABEL, getPins, listWorks, type Medium } from "@/lib/queries";
@@ -79,35 +80,19 @@ export default async function MapPage({
           </Link>
         ))}
         <span className="mx-1 text-rule-2">｜</span>
-        <Link
-          href={qs({ work: undefined })}
-          className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-            !workSlug ? "bg-ink text-paper" : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
-          }`}
-        >
-          全作品
-        </Link>
-        {works.map((w) => (
-          <Link
-            key={w.id}
-            href={qs({ work: w.slug })}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-              workSlug === w.slug
-                ? "bg-shu text-paper"
-                : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
-            }`}
-          >
-            {w.title}
+        <WorkFilterSelect
+          works={works.map((w) => ({ slug: w.slug, title: w.title, author: w.author }))}
+          value={workSlug}
+          medium={medium}
+        />
+        {work && (
+          <Link href={qs({ work: undefined })} className="text-xs text-ink-3 hover:text-shu">
+            絞り込みを解除
           </Link>
-        ))}
+        )}
       </div>
 
-      <MapContribute
-        pins={mapPins}
-        works={works.map((w) => ({ id: w.id, title: w.title, author: w.author, medium: w.medium }))}
-        loggedIn={!!user}
-        height={620}
-      />
+      <MapContribute pins={mapPins} loggedIn={!!user} height={620} />
 
       <section>
         <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">都道府県別</h2>

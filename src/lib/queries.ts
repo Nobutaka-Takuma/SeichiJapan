@@ -79,6 +79,10 @@ export type PassageWithCandidates = {
   image_caption: string;
   image_credit: string;
   created_at: string;
+  updated_at: string | null;
+  editor_handle: string | null;
+  editor_name: string | null;
+  revision_count: number;
   author_handle: string;
   author_name: string;
   candidates: Candidate[];
@@ -147,7 +151,10 @@ function attachCandidates(
 }
 
 const PASSAGE_COLUMNS = `p.id, p.work_id, p.chapter, p.kind, p.quote, p.note, p.created_at,
-       p.image_path, p.image_caption, p.image_credit,
+       p.image_path, p.image_caption, p.image_credit, p.updated_at,
+       (SELECT handle FROM users WHERE id = p.updated_by) AS editor_handle,
+       (SELECT display_name FROM users WHERE id = p.updated_by) AS editor_name,
+       (SELECT COUNT(*) FROM passage_revisions r WHERE r.passage_id = p.id) AS revision_count,
        COALESCE(u.handle, '') AS author_handle, COALESCE(u.display_name, '退会したユーザー') AS author_name,
        (SELECT COUNT(*) FROM comments c WHERE c.passage_id = p.id) AS comment_count`;
 
@@ -164,21 +171,7 @@ export function listWorks(query?: string, medium?: string): WorkSummary[] {
   }
   return db
     .prepare(
-      `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description,
-              (SELECT COUNT(DISTINCT i.place_id) FROM identifications i
-                 JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id) AS place_count,
-              (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS passage_count,
-              (SELECT COUNT(DISTINCT uid) FROM (
-                  SELECT p.created_by AS uid FROM passages p WHERE p.work_id = w.id
-                  UNION
-                  SELECT i.created_by FROM identifications i JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
-                  UNION
-                  SELECT v.user_id FROM votes v
-                    JOIN identifications i ON i.id = v.identification_id
-                    JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
-                  UNION
-                  SELECT c.user_id FROM comments c JOIN passages p ON p.id = c.passage_id WHERE p.work_id = w.id
-              ) WHERE uid IS NOT NULL) AS contributor_count
+      `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description, ${WORK_COUNTS}
          FROM works w
          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
         ORDER BY place_count DESC, w.title ASC`,
@@ -186,10 +179,66 @@ export function listWorks(query?: string, medium?: string): WorkSummary[] {
     .all(...(Object.keys(params).length ? [params] : [])) as WorkSummary[];
 }
 
+const WORK_COUNTS = `
+  (SELECT COUNT(DISTINCT i.place_id) FROM identifications i
+     JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id) AS place_count,
+  (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS passage_count,
+  (SELECT COUNT(DISTINCT uid) FROM (
+      SELECT p.created_by AS uid FROM passages p WHERE p.work_id = w.id
+      UNION
+      SELECT i.created_by FROM identifications i JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
+      UNION
+      SELECT v.user_id FROM votes v
+        JOIN identifications i ON i.id = v.identification_id
+        JOIN passages p ON p.id = i.passage_id WHERE p.work_id = w.id
+      UNION
+      SELECT c.user_id FROM comments c JOIN passages p ON p.id = c.passage_id WHERE p.work_id = w.id
+  ) WHERE uid IS NOT NULL) AS contributor_count`;
+
 export function getWork(slug: string): WorkSummary | undefined {
-  const row = db.prepare("SELECT slug FROM works WHERE slug = ?").get(slug) as { slug: string } | undefined;
-  if (!row) return undefined;
-  return listWorks().find((w) => w.slug === slug);
+  return db
+    .prepare(
+      `SELECT w.id, w.slug, w.title, w.author, w.medium, w.year, w.description, ${WORK_COUNTS}
+         FROM works w WHERE w.slug = ?`,
+    )
+    .get(slug) as WorkSummary | undefined;
+}
+
+export function getWorkById(id: number): Work | undefined {
+  return db
+    .prepare("SELECT id, slug, title, author, medium, year, description FROM works WHERE id = ?")
+    .get(id) as Work | undefined;
+}
+
+export type WorkOption = { id: number; title: string; author: string; medium: Medium; place_count: number };
+
+/** 作品の予測入力用。作品数が増えても効くよう、件数を絞って返す。 */
+export function searchWorks(q: string, limit = 8): WorkOption[] {
+  const term = q.trim();
+  if (!term) {
+    return db
+      .prepare(
+        `SELECT w.id, w.title, w.author, w.medium,
+                (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS place_count
+           FROM works w
+          ORDER BY place_count DESC, w.title ASC LIMIT ?`,
+      )
+      .all(limit) as WorkOption[];
+  }
+  return db
+    .prepare(
+      `SELECT w.id, w.title, w.author, w.medium,
+              (SELECT COUNT(*) FROM passages p WHERE p.work_id = w.id) AS place_count
+         FROM works w
+        WHERE w.title LIKE @q OR w.author LIKE @q
+        ORDER BY
+          CASE WHEN w.title = @exact THEN 0
+               WHEN w.title LIKE @prefix THEN 1
+               ELSE 2 END,
+          place_count DESC, w.title ASC
+        LIMIT @limit`,
+    )
+    .all({ q: `%${term}%`, exact: term, prefix: `${term}%`, limit }) as WorkOption[];
 }
 
 export function getWorkPassages(workId: number, viewerId?: number): PassageWithCandidates[] {
@@ -313,6 +362,35 @@ export function getRevisions(placeId: number): Revision[] {
         ORDER BY r.id DESC`,
     )
     .all(placeId) as Revision[];
+}
+
+export type PassageRevision = {
+  id: number;
+  passage_id: number;
+  editor_id: number | null;
+  editor_handle: string | null;
+  editor_name: string;
+  chapter: string;
+  kind: string;
+  quote: string;
+  note: string;
+  image_path: string;
+  image_caption: string;
+  image_credit: string;
+  summary: string;
+  created_at: string;
+};
+
+export function getPassageRevisions(passageId: number): PassageRevision[] {
+  return db
+    .prepare(
+      `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
+         FROM passage_revisions r
+         LEFT JOIN users u ON u.id = r.editor_id
+        WHERE r.passage_id = ?
+        ORDER BY r.id DESC`,
+    )
+    .all(passageId) as PassageRevision[];
 }
 
 export function getRevision(id: number): Revision | undefined {

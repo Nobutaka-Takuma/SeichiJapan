@@ -2,9 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { revertPlaceAction } from "@/app/actions";
+import { revertPassageAction, revertPlaceAction } from "@/app/actions";
 
-export function RevertButton({ revisionId, placeId }: { revisionId: number; placeId: number }) {
+export function RevertButton({
+  kind,
+  revisionId,
+  backHref,
+}: {
+  kind: "place" | "passage";
+  revisionId: number;
+  backHref: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
@@ -12,11 +20,7 @@ export function RevertButton({ revisionId, placeId }: { revisionId: number; plac
 
   if (!confirming) {
     return (
-      <button
-        type="button"
-        onClick={() => setConfirming(true)}
-        className="text-xs text-ink-3 hover:text-shu"
-      >
+      <button type="button" onClick={() => setConfirming(true)} className="text-xs text-ink-3 hover:text-shu">
         この版に戻す
       </button>
     );
@@ -30,9 +34,9 @@ export function RevertButton({ revisionId, placeId }: { revisionId: number; plac
         disabled={pending}
         onClick={() =>
           start(async () => {
-            const res = await revertPlaceAction(revisionId);
+            const res = kind === "place" ? await revertPlaceAction(revisionId) : await revertPassageAction(revisionId);
             if (res.error) setError(res.error);
-            else router.push(`/places/${placeId}`);
+            else router.push(backHref);
           })
         }
         className="rounded bg-shu px-2 py-1 font-bold text-paper disabled:opacity-50"
