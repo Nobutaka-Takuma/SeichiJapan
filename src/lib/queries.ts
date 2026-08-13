@@ -39,8 +39,15 @@ export type Place = {
   lng: number;
   prefecture: string;
   address: string;
-  note: string;
+  note: string; // リード文（一覧・地図の吹き出しに出る短い説明）
+  body: string; // 記事本文（共同編集）
+  access: string; // 行き方・訪問時の注意
+  photo_path: string;
+  updated_at: string | null;
+  updated_by: number | null;
 };
+
+const PLACE_COLUMNS = `id, name, lat, lng, prefecture, address, note, body, access, photo_path, updated_at, updated_by`;
 
 export type Candidate = {
   id: number;
@@ -68,6 +75,9 @@ export type PassageWithCandidates = {
   kind: "text" | "scene";
   quote: string;
   note: string;
+  image_path: string;
+  image_caption: string;
+  image_credit: string;
   created_at: string;
   author_handle: string;
   author_name: string;
@@ -137,6 +147,7 @@ function attachCandidates(
 }
 
 const PASSAGE_COLUMNS = `p.id, p.work_id, p.chapter, p.kind, p.quote, p.note, p.created_at,
+       p.image_path, p.image_caption, p.image_credit,
        COALESCE(u.handle, '') AS author_handle, COALESCE(u.display_name, '退会したユーザー') AS author_name,
        (SELECT COUNT(*) FROM comments c WHERE c.passage_id = p.id) AS comment_count`;
 
@@ -234,10 +245,107 @@ export function getComments(passageId: number): CommentRow[] {
     .all(passageId) as CommentRow[];
 }
 
-export function getPlace(id: number): Place | undefined {
-  return db.prepare("SELECT id, name, lat, lng, prefecture, address, note FROM places WHERE id = ?").get(id) as
-    | Place
-    | undefined;
+export type PlaceDetail = Place & {
+  likes: number;
+  liked_by_me: boolean;
+  editor_handle: string | null;
+  editor_name: string | null;
+  revision_count: number;
+  contributor_count: number;
+};
+
+export function getPlace(id: number, viewerId?: number): PlaceDetail | undefined {
+  const place = db.prepare(`SELECT ${PLACE_COLUMNS} FROM places WHERE id = ?`).get(id) as Place | undefined;
+  if (!place) return undefined;
+
+  const likes = (db.prepare("SELECT COUNT(*) AS n FROM place_likes WHERE place_id = ?").get(id) as { n: number }).n;
+  const liked = viewerId
+    ? !!db.prepare("SELECT 1 FROM place_likes WHERE place_id = ? AND user_id = ?").get(id, viewerId)
+    : false;
+  const editor = place.updated_by
+    ? (db.prepare("SELECT handle, display_name FROM users WHERE id = ?").get(place.updated_by) as
+        | { handle: string; display_name: string }
+        | undefined)
+    : undefined;
+  const revisions = db
+    .prepare(
+      "SELECT COUNT(*) AS n, COUNT(DISTINCT editor_id) AS c FROM place_revisions WHERE place_id = ?",
+    )
+    .get(id) as { n: number; c: number };
+
+  return {
+    ...place,
+    likes,
+    liked_by_me: liked,
+    editor_handle: editor?.handle ?? null,
+    editor_name: editor?.display_name ?? null,
+    revision_count: revisions.n,
+    contributor_count: revisions.c,
+  };
+}
+
+export type Revision = {
+  id: number;
+  place_id: number;
+  editor_id: number | null;
+  editor_handle: string | null;
+  editor_name: string;
+  name: string;
+  lat: number;
+  lng: number;
+  prefecture: string;
+  address: string;
+  note: string;
+  body: string;
+  access: string;
+  photo_path: string;
+  summary: string;
+  created_at: string;
+};
+
+export function getRevisions(placeId: number): Revision[] {
+  return db
+    .prepare(
+      `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
+         FROM place_revisions r
+         LEFT JOIN users u ON u.id = r.editor_id
+        WHERE r.place_id = ?
+        ORDER BY r.id DESC`,
+    )
+    .all(placeId) as Revision[];
+}
+
+export function getRevision(id: number): Revision | undefined {
+  return db
+    .prepare(
+      `SELECT r.*, u.handle AS editor_handle, COALESCE(u.display_name, '不明') AS editor_name
+         FROM place_revisions r
+         LEFT JOIN users u ON u.id = r.editor_id
+        WHERE r.id = ?`,
+    )
+    .get(id) as Revision | undefined;
+}
+
+/** 地図上のある点の近くにある登録済みの場所。地図から書き込むときの候補に使う。 */
+export function nearbyPlaces(lat: number, lng: number, limit = 6): (Place & { distance_m: number })[] {
+  // 緯度1度≒111km、経度は緯度に応じて縮む。粗い近似で十分。
+  const latScale = 111_000;
+  const lngScale = 111_000 * Math.cos((lat * Math.PI) / 180);
+  const rows = db
+    .prepare(
+      `SELECT ${PLACE_COLUMNS},
+              ((lat - @lat) * @latScale) AS dy,
+              ((lng - @lng) * @lngScale) AS dx
+         FROM places
+        WHERE lat BETWEEN @lat - 0.09 AND @lat + 0.09
+          AND lng BETWEEN @lng - 0.12 AND @lng + 0.12`,
+    )
+    .all({ lat, lng, latScale, lngScale }) as (Place & { dy: number; dx: number })[];
+
+  return rows
+    .map(({ dy, dx, ...p }) => ({ ...p, distance_m: Math.round(Math.hypot(dy, dx)) }))
+    .sort((a, b) => a.distance_m - b.distance_m)
+    .slice(0, limit);
 }
 
 export type Appearance = {
@@ -245,31 +353,43 @@ export type Appearance = {
   quote: string;
   kind: string;
   chapter: string;
+  note: string;
+  image_path: string;
+  image_caption: string;
+  image_credit: string;
   work_slug: string;
   work_title: string;
   work_author: string;
   medium: Medium;
   confidence: number;
+  disputed: boolean;
 };
 
-/** ある場所が「どの作品のどの記述に出てくるとされているか」の逆引き。 */
+/** ある場所が「どの作品のどのシーンに出てくるか」の逆引き。場所ページの主役。 */
 export function getAppearances(placeId: number): Appearance[] {
   const rows = db
     .prepare(
-      `SELECT i.passage_id, p.quote, p.kind, p.chapter, w.slug AS work_slug, w.title AS work_title,
-              w.author AS work_author, w.medium
+      `SELECT i.passage_id, p.quote, p.kind, p.chapter, p.note,
+              p.image_path, p.image_caption, p.image_credit,
+              w.slug AS work_slug, w.title AS work_title, w.author AS work_author, w.medium
          FROM identifications i
          JOIN passages p ON p.id = i.passage_id
          JOIN works w ON w.id = p.work_id
-        WHERE i.place_id = ?`,
+        WHERE i.place_id = ?
+        ORDER BY i.created_at ASC`,
     )
-    .all(placeId) as Omit<Appearance, "confidence">[];
+    .all(placeId) as Omit<Appearance, "confidence" | "disputed">[];
+
   const cands = candidatesFor(rows.map((r) => r.passage_id));
   return rows
-    .map((r) => ({
-      ...r,
-      confidence: cands.get(r.passage_id)?.find((c) => c.place_id === placeId)?.confidence ?? 0,
-    }))
+    .map((r) => {
+      const list = cands.get(r.passage_id) ?? [];
+      return {
+        ...r,
+        confidence: list.find((c) => c.place_id === placeId)?.confidence ?? 0,
+        disputed: list.length > 1,
+      };
+    })
     .sort((a, b) => b.confidence - a.confidence);
 }
 
@@ -284,11 +404,14 @@ export type Pin = {
   quote: string;
   kind: string;
   chapter: string;
+  image_path: string;
+  likes: number;
   work_slug: string;
   work_title: string;
   medium: Medium;
   confidence: number;
   rank: number;
+  disputed: boolean;
 };
 
 /** 地図に落とすピン。各記述の候補すべてを返し、rank=0 が最有力。 */
@@ -306,7 +429,8 @@ export function getPins(opts: { workId?: number; medium?: string } = {}): Pin[] 
   const rows = db
     .prepare(
       `SELECT i.id AS identification_id, i.passage_id, i.place_id, pl.name AS place_name,
-              pl.lat, pl.lng, pl.prefecture, p.quote, p.kind, p.chapter,
+              pl.lat, pl.lng, pl.prefecture, p.quote, p.kind, p.chapter, p.image_path,
+              (SELECT COUNT(*) FROM place_likes l WHERE l.place_id = pl.id) AS likes,
               w.slug AS work_slug, w.title AS work_title, w.medium
          FROM identifications i
          JOIN places pl ON pl.id = i.place_id
@@ -314,14 +438,22 @@ export function getPins(opts: { workId?: number; medium?: string } = {}): Pin[] 
          JOIN works w ON w.id = p.work_id
          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`,
     )
-    .all(...(Object.keys(params).length ? [params] : [])) as Omit<Pin, "confidence" | "rank">[];
+    .all(...(Object.keys(params).length ? [params] : [])) as Omit<
+    Pin,
+    "confidence" | "rank" | "disputed"
+  >[];
 
   const cands = candidatesFor([...new Set(rows.map((r) => r.passage_id))]);
   return rows
     .map((r) => {
       const list = cands.get(r.passage_id) ?? [];
       const idx = list.findIndex((c) => c.id === r.identification_id);
-      return { ...r, confidence: idx >= 0 ? list[idx].confidence : 0, rank: idx < 0 ? 99 : idx };
+      return {
+        ...r,
+        confidence: idx >= 0 ? list[idx].confidence : 0,
+        rank: idx < 0 ? 99 : idx,
+        disputed: list.length > 1,
+      };
     })
     .sort((a, b) => a.rank - b.rank);
 }
@@ -329,27 +461,46 @@ export function getPins(opts: { workId?: number; medium?: string } = {}): Pin[] 
 export function searchPlaces(q: string, limit = 20): Place[] {
   return db
     .prepare(
-      `SELECT id, name, lat, lng, prefecture, address, note FROM places
+      `SELECT ${PLACE_COLUMNS} FROM places
         WHERE name LIKE @q OR prefecture LIKE @q OR address LIKE @q
         ORDER BY name LIMIT @limit`,
     )
     .all({ q: `%${q}%`, limit }) as Place[];
 }
 
-export function listPlaces(limit = 500): (Place & { work_count: number })[] {
+export type PlaceCard = Place & { work_count: number; scene_count: number; likes: number };
+
+export function listPlaces(limit = 500, sort: "likes" | "works" | "name" = "likes"): PlaceCard[] {
+  const order =
+    sort === "likes"
+      ? "likes DESC, work_count DESC, pl.name ASC"
+      : sort === "works"
+        ? "work_count DESC, likes DESC, pl.name ASC"
+        : "pl.name ASC";
   return db
     .prepare(
-      `SELECT pl.id, pl.name, pl.lat, pl.lng, pl.prefecture, pl.address, pl.note,
+      `SELECT ${PLACE_COLUMNS.split(", ").map((c) => `pl.${c}`).join(", ")},
               (SELECT COUNT(DISTINCT p.work_id) FROM identifications i
-                 JOIN passages p ON p.id = i.passage_id WHERE i.place_id = pl.id) AS work_count
+                 JOIN passages p ON p.id = i.passage_id WHERE i.place_id = pl.id) AS work_count,
+              (SELECT COUNT(*) FROM identifications i WHERE i.place_id = pl.id) AS scene_count,
+              (SELECT COUNT(*) FROM place_likes l WHERE l.place_id = pl.id) AS likes
          FROM places pl
-        ORDER BY work_count DESC, pl.name ASC
+        ORDER BY ${order}
         LIMIT ?`,
     )
-    .all(limit) as (Place & { work_count: number })[];
+    .all(limit) as PlaceCard[];
 }
 
-export type SiteStats = { works: number; places: number; passages: number; users: number; votes: number };
+export type SiteStats = {
+  works: number;
+  places: number;
+  passages: number;
+  users: number;
+  votes: number;
+  likes: number;
+  edits: number;
+  photos: number;
+};
 
 export function siteStats(): SiteStats {
   const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
@@ -359,50 +510,114 @@ export function siteStats(): SiteStats {
     passages: one("SELECT COUNT(*) AS n FROM passages"),
     users: one("SELECT COUNT(*) AS n FROM users"),
     votes: one("SELECT COUNT(*) AS n FROM votes"),
+    likes: one("SELECT COUNT(*) AS n FROM place_likes"),
+    edits: one("SELECT COUNT(*) AS n FROM place_revisions"),
+    photos: one("SELECT COUNT(*) AS n FROM passages WHERE image_path <> ''"),
   };
 }
 
 export type ActivityItem = {
-  kind: "identification" | "comment" | "passage";
+  kind: "scene" | "comment" | "edit";
   created_at: string;
-  passage_id: number;
-  quote: string;
-  work_title: string;
-  work_slug: string;
+  href: string;
+  title: string;
+  context: string;
   actor: string;
   actor_handle: string;
-  detail: string;
 };
 
 export function recentActivity(limit = 12): ActivityItem[] {
-  return db
+  const scenes = db
     .prepare(
-      `SELECT * FROM (
-         SELECT 'identification' AS kind, i.created_at, p.id AS passage_id, p.quote,
-                w.title AS work_title, w.slug AS work_slug,
-                COALESCE(u.display_name,'?') AS actor, COALESCE(u.handle,'') AS actor_handle,
-                pl.name AS detail
-           FROM identifications i
-           JOIN passages p ON p.id = i.passage_id
-           JOIN works w ON w.id = p.work_id
-           JOIN places pl ON pl.id = i.place_id
-           LEFT JOIN users u ON u.id = i.created_by
-         UNION ALL
-         SELECT 'comment', c.created_at, p.id, p.quote, w.title, w.slug,
-                u.display_name, u.handle, substr(c.body, 1, 80)
-           FROM comments c
-           JOIN passages p ON p.id = c.passage_id
-           JOIN works w ON w.id = p.work_id
-           JOIN users u ON u.id = c.user_id
-         UNION ALL
-         SELECT 'passage', p.created_at, p.id, p.quote, w.title, w.slug,
-                COALESCE(u.display_name,'?'), COALESCE(u.handle,''), p.chapter
-           FROM passages p
-           JOIN works w ON w.id = p.work_id
-           LEFT JOIN users u ON u.id = p.created_by
-       ) ORDER BY created_at DESC, passage_id DESC LIMIT ?`,
+      `SELECT i.created_at, p.id AS passage_id, p.quote, pl.id AS place_id, pl.name AS place_name,
+              w.title AS work_title,
+              COALESCE(u.display_name,'不明') AS actor, COALESCE(u.handle,'') AS actor_handle
+         FROM identifications i
+         JOIN passages p ON p.id = i.passage_id
+         JOIN works w ON w.id = p.work_id
+         JOIN places pl ON pl.id = i.place_id
+         LEFT JOIN users u ON u.id = i.created_by
+        ORDER BY i.created_at DESC, i.id DESC LIMIT ?`,
     )
-    .all(limit) as ActivityItem[];
+    .all(limit) as {
+    created_at: string;
+    passage_id: number;
+    quote: string;
+    place_id: number;
+    place_name: string;
+    work_title: string;
+    actor: string;
+    actor_handle: string;
+  }[];
+
+  const comments = db
+    .prepare(
+      `SELECT c.created_at, p.id AS passage_id, substr(c.body, 1, 70) AS body, w.title AS work_title,
+              u.display_name AS actor, u.handle AS actor_handle
+         FROM comments c
+         JOIN passages p ON p.id = c.passage_id
+         JOIN works w ON w.id = p.work_id
+         JOIN users u ON u.id = c.user_id
+        ORDER BY c.created_at DESC, c.id DESC LIMIT ?`,
+    )
+    .all(limit) as {
+    created_at: string;
+    passage_id: number;
+    body: string;
+    work_title: string;
+    actor: string;
+    actor_handle: string;
+  }[];
+
+  const edits = db
+    .prepare(
+      `SELECT r.created_at, r.place_id, r.summary, pl.name AS place_name,
+              COALESCE(u.display_name,'不明') AS actor, COALESCE(u.handle,'') AS actor_handle
+         FROM place_revisions r
+         JOIN places pl ON pl.id = r.place_id
+         LEFT JOIN users u ON u.id = r.editor_id
+        ORDER BY r.created_at DESC, r.id DESC LIMIT ?`,
+    )
+    .all(limit) as {
+    created_at: string;
+    place_id: number;
+    summary: string;
+    place_name: string;
+    actor: string;
+    actor_handle: string;
+  }[];
+
+  const items: ActivityItem[] = [
+    ...scenes.map((s) => ({
+      kind: "scene" as const,
+      created_at: s.created_at,
+      href: `/places/${s.place_id}`,
+      title: `${s.place_name} に『${s.work_title}』のシーンを追加`,
+      context: s.quote,
+      actor: s.actor,
+      actor_handle: s.actor_handle,
+    })),
+    ...comments.map((c) => ({
+      kind: "comment" as const,
+      created_at: c.created_at,
+      href: `/passages/${c.passage_id}`,
+      title: c.body,
+      context: c.work_title,
+      actor: c.actor,
+      actor_handle: c.actor_handle,
+    })),
+    ...edits.map((e) => ({
+      kind: "edit" as const,
+      created_at: e.created_at,
+      href: `/places/${e.place_id}`,
+      title: `${e.place_name} の記事を編集`,
+      context: e.summary || "編集要約なし",
+      actor: e.actor,
+      actor_handle: e.actor_handle,
+    })),
+  ];
+
+  return items.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit);
 }
 
 /** 議論が割れている記述（確度が拮抗しているもの）を拾う。 */
@@ -472,6 +687,21 @@ export function getUserContributions(userId: number) {
     )
     .all(userId) as { id: number; body: string; created_at: string; passage_id: number; quote: string; work_title: string }[];
 
-  const votes = (db.prepare("SELECT COUNT(*) AS n FROM votes WHERE user_id = ?").get(userId) as { n: number }).n;
-  return { idents, comments, votes };
+  const edits = db
+    .prepare(
+      `SELECT r.id, r.created_at, r.summary, r.place_id, pl.name AS place_name
+         FROM place_revisions r
+         JOIN places pl ON pl.id = r.place_id
+        WHERE r.editor_id = ? ORDER BY r.created_at DESC LIMIT 50`,
+    )
+    .all(userId) as { id: number; created_at: string; summary: string; place_id: number; place_name: string }[];
+
+  const count = (sql: string) => (db.prepare(sql).get(userId) as { n: number }).n;
+  return {
+    idents,
+    comments,
+    edits,
+    votes: count("SELECT COUNT(*) AS n FROM votes WHERE user_id = ?"),
+    likes: count("SELECT COUNT(*) AS n FROM place_likes WHERE user_id = ?"),
+  };
 }

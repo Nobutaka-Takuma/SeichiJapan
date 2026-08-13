@@ -15,7 +15,7 @@ export default async function UserPage({ params }: { params: Promise<{ handle: s
   const user = getUserByHandle(handle);
   if (!user) notFound();
 
-  const { idents, comments, votes } = getUserContributions(user.id);
+  const { idents, comments, edits, votes, likes } = getUserContributions(user.id);
 
   return (
     <div className="space-y-8">
@@ -23,15 +23,36 @@ export default async function UserPage({ params }: { params: Promise<{ handle: s
         <h1 className="font-serif text-2xl font-bold tracking-wide">{user.display_name}</h1>
         <p className="text-sm text-ink-3">@{user.handle}・{user.created_at.slice(0, 10)}から参加</p>
         {user.bio && <p className="mt-3 max-w-2xl leading-relaxed text-ink-2">{user.bio}</p>}
-        <dl className="mt-5 flex gap-8">
-          <Stat label="出した説" value={idents.length} unit="件" />
+        <dl className="mt-5 flex flex-wrap gap-8">
+          <Stat label="登録したシーン" value={idents.length} unit="件" />
+          <Stat label="記事の編集" value={edits.length} unit="回" />
+          <Stat label="いいね" value={likes} unit="件" />
           <Stat label="投じた票" value={votes} unit="票" />
           <Stat label="コメント" value={comments.length} unit="件" />
         </dl>
       </header>
 
       <section>
-        <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">出した説</h2>
+        <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">記事の編集</h2>
+        {edits.length === 0 ? (
+          <Empty>まだ記事の編集はありません。</Empty>
+        ) : (
+          <Card className="divide-y divide-rule">
+            {edits.map((e) => (
+              <Link key={e.id} href={`/places/${e.place_id}`} className="flex gap-3 px-4 py-3 hover:bg-paper-2/50">
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="font-bold text-ink-2">{e.place_name}</span>
+                  <span className="mt-0.5 block truncate text-xs text-ink-3">{e.summary || "編集要約なし"}</span>
+                </span>
+                <span className="shrink-0 text-xs text-ink-3">{e.created_at.slice(0, 10)}</span>
+              </Link>
+            ))}
+          </Card>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">登録したシーン</h2>
         {idents.length === 0 ? (
           <Empty>まだ比定案の投稿はありません。</Empty>
         ) : (

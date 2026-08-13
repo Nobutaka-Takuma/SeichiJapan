@@ -114,10 +114,22 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
                     <span className="ml-auto">{p.votes}票・{p.comment_count}コメント</span>
                   </div>
 
-                  <Link href={`/passages/${p.id}`} className="group mt-3 block">
-                    <PassageQuote kind={p.kind} quote={p.quote} className="group-hover:text-shu" />
-                  </Link>
-                  {p.note && <p className="mt-2 text-sm leading-relaxed text-ink-3">{p.note}</p>}
+                  <div className="mt-3 flex gap-4">
+                    {p.image_path && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.image_path}
+                        alt={p.image_caption || ""}
+                        className="hidden h-24 w-36 shrink-0 rounded object-cover sm:block"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <Link href={`/passages/${p.id}`} className="group block">
+                        <PassageQuote kind={p.kind} quote={p.quote} className="group-hover:text-shu" />
+                      </Link>
+                      {p.note && <p className="mt-2 text-sm leading-relaxed text-ink-3">{p.note}</p>}
+                    </div>
+                  </div>
 
                   <ul className="mt-4 space-y-2.5">
                     {p.candidates.map((c) => (
@@ -128,20 +140,28 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
                         >
                           {c.place_name}
                         </Link>
-                        <ConfidenceBar share={c.confidence} />
-                        <span className="hidden w-16 shrink-0 text-right text-xs text-ink-3 sm:inline">
-                          {c.up > 0 && `↑${c.up}`}
-                          {c.down > 0 && ` ↓${c.down}`}
-                        </span>
+                        {p.candidates.length > 1 ? (
+                          <>
+                            <ConfidenceBar share={c.confidence} />
+                            <span className="hidden w-16 shrink-0 text-right text-xs text-ink-3 sm:inline">
+                              {c.up > 0 && `↑${c.up}`}
+                              {c.down > 0 && ` ↓${c.down}`}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-ink-3">
+                            {c.prefecture} — この場所の項目を見る
+                          </span>
+                        )}
                       </li>
                     ))}
                     {p.candidates.length === 0 && (
-                      <li className="text-sm text-ink-3">まだ候補が出ていません。</li>
+                      <li className="text-sm text-ink-3">まだ場所が結びついていません。</li>
                     )}
                   </ul>
 
                   <Link href={`/passages/${p.id}`} className="mt-4 inline-block text-xs font-bold text-shu hover:underline">
-                    候補を出す・議論する →
+                    このシーンの詳細 →
                   </Link>
                 </Card>
               </li>

@@ -100,6 +100,13 @@ a {
   opacity: 0.72;
   border-style: dashed;
 }
+.seichi-pin--disputed {
+  border-style: dashed;
+}
+.seichi-pin--pick {
+  font-size: 11px;
+  box-shadow: 0 0 0 6px rgba(63, 95, 122, 0.22);
+}
 
 /* 縦書きの見出し（作品ページの飾り） */
 .tategaki {

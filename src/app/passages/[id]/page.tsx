@@ -77,6 +77,24 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
         <div className="mt-3 text-xl sm:text-2xl">
           <PassageQuote kind={passage.kind} quote={passage.quote} />
         </div>
+        {passage.image_path && (
+          <figure className="mt-5 max-w-2xl">
+            {/* 利用者が投稿した画像。サイズが不定なので next/image は使わない */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={passage.image_path}
+              alt={passage.image_caption || passage.work.title}
+              className="w-full rounded-lg border border-rule object-cover"
+              style={{ maxHeight: 420 }}
+            />
+            {(passage.image_caption || passage.image_credit) && (
+              <figcaption className="mt-1.5 text-xs text-ink-3">
+                {passage.image_caption}
+                {passage.image_credit && <span className="ml-2">（{passage.image_credit}）</span>}
+              </figcaption>
+            )}
+          </figure>
+        )}
         {passage.note && (
           <p className="mt-4 max-w-3xl rounded-md bg-paper-2/60 px-4 py-3 text-sm leading-relaxed text-ink-2">
             {passage.note}
@@ -106,7 +124,7 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
           </div>
 
           {passage.candidates.length === 0 ? (
-            <Empty>まだ候補がありません。最初の説を出してみてください。</Empty>
+            <Empty>この記述に結びついた場所がまだありません。</Empty>
           ) : (
             <ol className="space-y-3">
               {passage.candidates.map((c, i) => (
@@ -145,9 +163,15 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
                       />
                     </div>
 
-                    <div className="mt-3">
-                      <ConfidenceBar share={c.confidence} />
-                    </div>
+                    {passage.candidates.length > 1 ? (
+                      <div className="mt-3">
+                        <ConfidenceBar share={c.confidence} />
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs text-ink-3">
+                        異説は出ていません。この場所で定説として扱われています。
+                      </p>
+                    )}
 
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{c.rationale}</p>
 

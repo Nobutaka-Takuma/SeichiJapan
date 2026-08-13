@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { currentUser, login, logout, register } from "@/lib/auth";
+import { UploadError, saveImage } from "@/lib/uploads";
 
 export type FormState = { error?: string; ok?: string };
 
@@ -11,7 +12,15 @@ function fail(e: unknown): FormState {
   return { error: e instanceof Error ? e.message : "エラーが発生しました" };
 }
 
-const str = (fd: FormData, key: string) => String(fd.get(key) ?? "").trim();
+/**
+ * フォームの値を取り出す。
+ * textarea の改行はブラウザが CRLF で送ってくる（HTML仕様）ので LF に正規化する。
+ * これをしないと、改行だけが違う同じ本文が差分で「全行が変更」に見えてしまう。
+ */
+const str = (fd: FormData, key: string) =>
+  String(fd.get(key) ?? "")
+    .replace(/\r\n/g, "\n")
+    .trim();
 
 /**
  * ログイン後の戻り先。外部サイトへの誘導を防ぐため相対パスだけを許し、
@@ -45,6 +54,228 @@ export async function loginAction(_prev: FormState, fd: FormData): Promise<FormS
 export async function logoutAction() {
   await logout();
   redirect("/");
+}
+
+/* ---------- 場所への「いいね」 ---------- */
+
+export async function toggleLikeAction(placeId: number): Promise<FormState & { liked?: boolean }> {
+  const user = await currentUser();
+  if (!user) return { error: "いいねするにはログインが必要です" };
+
+  const existing = db
+    .prepare("SELECT 1 FROM place_likes WHERE place_id = ? AND user_id = ?")
+    .get(placeId, user.id);
+
+  if (existing) {
+    db.prepare("DELETE FROM place_likes WHERE place_id = ? AND user_id = ?").run(placeId, user.id);
+  } else {
+    db.prepare("INSERT OR IGNORE INTO place_likes (place_id, user_id) VALUES (?, ?)").run(placeId, user.id);
+  }
+
+  revalidatePath(`/places/${placeId}`);
+  revalidatePath("/places");
+  revalidatePath("/");
+  return { ok: "更新しました", liked: !existing };
+}
+
+/* ---------- 場所の記事の共同編集 ---------- */
+
+/** 現在の内容を版として記録する。編集のたびに「編集後の状態」を1件積む。 */
+function snapshot(placeId: number, editorId: number | null, summary: string) {
+  db.prepare(
+    `INSERT INTO place_revisions
+       (place_id, editor_id, name, lat, lng, prefecture, address, note, body, access, photo_path, summary)
+     SELECT id, @editor, name, lat, lng, prefecture, address, note, body, access, photo_path, @summary
+       FROM places WHERE id = @place`,
+  ).run({ place: placeId, editor: editorId, summary });
+}
+
+export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const user = await currentUser();
+  if (!user) return { error: "編集するにはログインが必要です" };
+
+  const placeId = Number(fd.get("place_id"));
+  const current = db.prepare("SELECT id, photo_path FROM places WHERE id = ?").get(placeId) as
+    | { id: number; photo_path: string }
+    | undefined;
+  if (!current) return { error: "場所が見つかりません" };
+
+  const name = str(fd, "name");
+  if (!name) return { error: "名前を入力してください" };
+
+  const lat = Number(fd.get("lat"));
+  const lng = Number(fd.get("lng"));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return { error: "緯度・経度が正しくありません" };
+  }
+
+  try {
+    let photo = current.photo_path;
+    if (str(fd, "remove_photo") === "1") photo = "";
+    const uploaded = await saveImage(fd.get("photo"));
+    if (uploaded) photo = uploaded;
+
+    db.prepare(
+      `UPDATE places
+          SET name = @name, lat = @lat, lng = @lng, prefecture = @prefecture, address = @address,
+              note = @note, body = @body, access = @access, photo_path = @photo,
+              updated_at = datetime('now'), updated_by = @user
+        WHERE id = @id`,
+    ).run({
+      id: placeId,
+      name,
+      lat,
+      lng,
+      prefecture: str(fd, "prefecture"),
+      address: str(fd, "address"),
+      note: str(fd, "note"),
+      body: str(fd, "body"),
+      access: str(fd, "access"),
+      photo,
+      user: user.id,
+    });
+
+    snapshot(placeId, user.id, str(fd, "summary"));
+  } catch (e) {
+    if (e instanceof UploadError) return { error: e.message };
+    return fail(e);
+  }
+
+  revalidatePath(`/places/${placeId}`);
+  revalidatePath("/places");
+  revalidatePath("/map");
+  redirect(`/places/${placeId}`);
+}
+
+/** 過去の版の内容で上書きする。差し戻したこと自体も履歴に残る。 */
+export async function revertPlaceAction(revisionId: number): Promise<FormState> {
+  const user = await currentUser();
+  if (!user) return { error: "差し戻すにはログインが必要です" };
+
+  const rev = db.prepare("SELECT * FROM place_revisions WHERE id = ?").get(revisionId) as
+    | {
+        id: number;
+        place_id: number;
+        name: string;
+        lat: number;
+        lng: number;
+        prefecture: string;
+        address: string;
+        note: string;
+        body: string;
+        access: string;
+        photo_path: string;
+      }
+    | undefined;
+  if (!rev) return { error: "指定された版が見つかりません" };
+
+  try {
+    db.prepare(
+      `UPDATE places
+          SET name = @name, lat = @lat, lng = @lng, prefecture = @prefecture, address = @address,
+              note = @note, body = @body, access = @access, photo_path = @photo_path,
+              updated_at = datetime('now'), updated_by = @user
+        WHERE id = @id`,
+    ).run({ ...rev, id: rev.place_id, user: user.id });
+    snapshot(rev.place_id, user.id, `#${rev.id} の版へ差し戻し`);
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath(`/places/${rev.place_id}`);
+  revalidatePath(`/places/${rev.place_id}/history`);
+  return { ok: "差し戻しました" };
+}
+
+/* ---------- 地図からのシーン投稿 ---------- */
+
+/**
+ * 「ここは○○のあのシーンの場所」を一度に登録する。
+ * 場所（新規なら作成）・シーン・場所との結びつけをまとめて作る。
+ */
+export async function addSceneAction(_prev: FormState, fd: FormData): Promise<FormState & { placeId?: number }> {
+  const user = await currentUser();
+  if (!user) return { error: "投稿するにはログインが必要です" };
+
+  const workId = Number(fd.get("work_id"));
+  const work = db.prepare("SELECT id, slug FROM works WHERE id = ?").get(workId) as
+    | { id: number; slug: string }
+    | undefined;
+  if (!work) return { error: "作品を選んでください" };
+
+  const quote = str(fd, "quote");
+  if (quote.length < 5) return { error: "シーンの説明を5文字以上で書いてください" };
+
+  let placeId = Number(fd.get("place_id")) || 0;
+
+  try {
+    if (!placeId) {
+      const name = str(fd, "place_name");
+      const lat = Number(fd.get("lat"));
+      const lng = Number(fd.get("lng"));
+      if (!name) return { error: "場所の名前を入力してください" };
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return { error: "地図をクリックして場所を指定してください" };
+      }
+      placeId = db
+        .prepare(
+          `INSERT INTO places (name, lat, lng, prefecture, address, note, created_by, updated_at, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
+        )
+        .run(name, lat, lng, str(fd, "prefecture"), str(fd, "address"), str(fd, "place_note"), user.id, user.id)
+        .lastInsertRowid as number;
+      snapshot(placeId, user.id, "新規作成");
+    }
+
+    const image = await saveImage(fd.get("image"));
+
+    const order = (
+      db.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM passages WHERE work_id = ?").get(work.id) as {
+        n: number;
+      }
+    ).n;
+
+    const passageId = db
+      .prepare(
+        `INSERT INTO passages
+           (work_id, chapter, kind, quote, note, sort_order, created_by, image_path, image_caption, image_credit)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        work.id,
+        str(fd, "chapter"),
+        str(fd, "kind") || "scene",
+        quote,
+        str(fd, "note"),
+        order,
+        user.id,
+        image ?? "",
+        str(fd, "image_caption"),
+        str(fd, "image_credit"),
+      ).lastInsertRowid as number;
+
+    const identId = db
+      .prepare(
+        `INSERT INTO identifications (passage_id, place_id, rationale, evidence, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(passageId, placeId, str(fd, "rationale"), str(fd, "evidence") || "research", user.id)
+      .lastInsertRowid as number;
+
+    db.prepare("INSERT OR IGNORE INTO votes (identification_id, user_id, value) VALUES (?, ?, 1)").run(
+      identId,
+      user.id,
+    );
+  } catch (e) {
+    if (e instanceof UploadError) return { error: e.message };
+    return fail(e);
+  }
+
+  revalidatePath(`/places/${placeId}`);
+  revalidatePath(`/works/${work.slug}`);
+  revalidatePath("/map");
+  revalidatePath("/");
+  return { ok: "登録しました", placeId };
 }
 
 /* ---------- 投票 ---------- */
@@ -108,6 +339,7 @@ export async function addIdentificationAction(_prev: FormState, fd: FormData): P
         )
         .run(name, lat, lng, str(fd, "prefecture"), str(fd, "address"), str(fd, "place_note"), user.id)
         .lastInsertRowid as number;
+      snapshot(placeId, user.id, "新規作成");
     }
 
     const rationale = str(fd, "rationale");

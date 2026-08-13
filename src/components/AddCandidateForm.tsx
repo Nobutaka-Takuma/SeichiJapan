@@ -44,8 +44,8 @@ export function AddCandidateForm({ passageId, loggedIn }: { passageId: number; l
 
   if (!loggedIn) {
     return (
-      <p className="rounded-md border border-dashed border-rule-2 px-4 py-5 text-center text-sm text-ink-3">
-        新しい説を出すには{" "}
+      <p className="rounded-md border border-dashed border-rule-2 px-4 py-4 text-center text-xs text-ink-3">
+        異説を出すには{" "}
         <Link href={`/login?next=/passages/${passageId}`} className="font-bold text-shu hover:underline">
           ログイン
         </Link>{" "}
@@ -59,9 +59,9 @@ export function AddCandidateForm({ passageId, loggedIn }: { passageId: number; l
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-md border border-dashed border-rule-2 px-4 py-4 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
+        className="w-full rounded-md border border-dashed border-rule-2 px-4 py-3 text-xs text-ink-3 hover:border-shu hover:text-shu"
       >
-        ＋ 別の場所を候補に挙げる
+        ここは違うと思う — 異説を出す
       </button>
     );
   }

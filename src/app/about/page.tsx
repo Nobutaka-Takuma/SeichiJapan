@@ -4,7 +4,7 @@ import { Card } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "このサイトについて",
-  description: "本文と現実の場所の対応づけを、根拠つきで共同編集する。確度の考え方と、参加のしかた。",
+  description: "場所ごとの項目をみんなで書き足していく、小説とアニメの地図帳。参加のしかたと決まりごと。",
 };
 
 export default function AboutPage() {
@@ -13,42 +13,97 @@ export default function AboutPage() {
       <header className="border-b border-rule pb-6">
         <h1 className="font-serif text-3xl font-bold tracking-wide">このサイトについて</h1>
         <p className="mt-3 leading-loose text-ink-2">
-          聖地日本は、小説やアニメに出てくる場所が現実のどこなのかを、みんなで持ち寄って地図にするサービスです。
+          聖地日本は、小説やアニメに出てくる場所を地図の上に集め、
+          その場所についての知識をみんなで書き足していく地図帳です。
         </p>
       </header>
 
       <section className="space-y-4">
-        <h2 className="font-serif text-xl font-bold tracking-wide">共同編集するのは「知識」ではなく「解釈」</h2>
+        <h2 className="font-serif text-xl font-bold tracking-wide">場所が主役です</h2>
         <p className="leading-loose text-ink-2">
-          百科事典が共同編集するのは知識です。ここで共同編集するのは、
-          <strong className="font-bold text-ink">物語と現実世界の対応関係</strong>——つまり解釈です。
+          どこがどのシーンの場所かは、たいていファンの間ではもう分かっています。
+          足りないのは、それが<strong className="font-bold text-ink">一箇所にまとまっていない</strong>ことです。
         </p>
-        <Card className="space-y-4 p-6">
-          <p className="font-serif leading-relaxed">
-            「彼は駅を出て、坂を下り、海の見える喫茶店に入った。」
-          </p>
-          <ul className="space-y-2.5 border-l-2 border-rule pl-4 text-sm leading-relaxed text-ink-2">
+        <p className="leading-loose text-ink-2">
+          だからこのサイトの中心は、場所ごとの<strong className="font-bold text-ink">項目</strong>です。
+          その場所がどんなところか、どの作品のどのシーンに出てくるか、どう行けばいいか、
+          訪ねるときに何に気をつけるべきか。ひとつのページにまとめ、
+          <strong className="font-bold text-ink">誰でも書き足せる</strong>ようにしています。
+        </p>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">誰でも編集できます</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            ["編集に許可はいりません", "ログインしていれば、どの項目でもすぐ直せます。誤字ひとつ、写真1枚でも十分な貢献です。"],
+            ["すべて履歴に残ります", "いつ誰が何を変えたかが版として残り、前の版との差分が行単位で見られます。"],
+            ["いつでも戻せます", "おかしな変更は、履歴から一手で差し戻せます。差し戻したこと自体も履歴に残ります。"],
+          ].map(([t, d]) => (
+            <Card key={t} className="p-5">
+              <h3 className="font-bold">{t}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-ink-2">{d}</p>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">地図から書き込む</h2>
+        <p className="leading-loose text-ink-2">
+          作品ページを探さなくても、<Link href="/map" className="font-bold text-shu hover:underline">全国地図</Link>
+          を開いて場所をクリックすれば、その場で「ここは○○のあのシーン」を登録できます。
+          近くにすでに登録された場所があれば候補として出るので、
+          同じ場所の項目が二重にできることを防げます。
+        </p>
+        <Card className="p-6">
+          <ol className="space-y-3 text-sm leading-relaxed text-ink-2">
             <li>
-              <b className="text-ink">Aさん</b>：これは○○駅だと思う
+              <b className="text-ink">1.</b> 地図をクリックして地点を決める（ピンはドラッグで微調整できます）
             </li>
             <li>
-              <b className="text-ink">Bさん</b>：いや、作者の当時の生活圏から考えると△△駅では？
+              <b className="text-ink">2.</b> 近くの場所から選ぶか、新しい場所として登録する
             </li>
             <li>
-              <b className="text-ink">Cさん</b>：当時の地図を見ると、この道順なら○○駅の可能性が高い
+              <b className="text-ink">3.</b> 作品と、そのシーンの説明を書く
             </li>
-          </ul>
-          <p className="text-sm leading-relaxed text-ink-2">
-            この議論が積み上がっていくこと自体に価値があります。結論だけでなく、
-            なぜそう考えたのかが残るようにしています。文学研究と百科事典の中間のような場所です。
-          </p>
+            <li>
+              <b className="text-ink">4.</b> 画像を添える。アニメなら場面の画像、小説なら本文の描写にあたるもの
+            </li>
+          </ol>
         </Card>
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-serif text-xl font-bold tracking-wide">確度の決まりかた</h2>
+        <h2 className="font-serif text-xl font-bold tracking-wide">画像について</h2>
         <p className="leading-loose text-ink-2">
-          ひとつの記述に複数の説が並んだとき、それぞれの説の支持（賛成票−反対票）の比率から確度を出しています。
+          <strong className="font-bold text-ink">自分で撮影した現地の写真を推奨します。</strong>
+          作品の映像・挿絵・スクリーンショットは権利者のものです。
+          引用の範囲を超える転載は避けてください。権利者から求めがあれば削除します。
+        </p>
+        <p className="leading-loose text-ink-2">
+          撮影者や出典が分かる場合は、画像に添えて記録してください。
+        </p>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">いいね</h2>
+        <p className="leading-loose text-ink-2">
+          行ってよかった場所、よく書けている項目にいいねを付けてください。
+          いいねの多い場所は地図のピンが大きくなり、一覧の上に出ます。
+          「どこから回ればいいか」の目印になります。
+        </p>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">まれに、説が割れたとき</h2>
+        <p className="leading-loose text-ink-2">
+          ほとんどの場所は決まっています。ただし古い小説などでは、
+          本文に固有名が書かれておらず、どこを指すのか意見が分かれることがあります。
+        </p>
+        <p className="leading-loose text-ink-2">
+          そういうときだけ、ひとつのシーンに複数の候補を並べ、根拠を書いて投票します。
+          票の比率から<strong className="font-bold text-ink">確度</strong>が出て、地図には対立する説も点線のピンで残ります。
         </p>
         <Card className="p-6">
           <p className="font-mono text-sm text-ink-2">
@@ -58,65 +113,35 @@ export default function AboutPage() {
           </p>
           <p className="mt-4 text-sm leading-relaxed text-ink-2">
             末尾の <b>+0.5</b> は、票が少ないうちに確度が振り切れないようにするための補正です。
-            また、説がひとつしかない場合は、票が集まるまで確度が頭打ちになります。
-            <b className="text-ink">「まだ誰も検証していない」ことと「検証されて支持された」ことを、区別するため</b>です。
+            異説が出ていないシーンでは確度の数字は表示しません。
+            確度は多数決の結果であって、正しさの証明ではありません。
           </p>
         </Card>
-        <p className="leading-loose text-ink-2">
-          確度は多数決の結果であって、正しさの証明ではありません。少数説が正しいことも当然あります。
-          だから対立する説も地図から消さず、点線のピンとして残しています。
-        </p>
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-serif text-xl font-bold tracking-wide">参加のしかた</h2>
-        <ol className="space-y-4">
-          {[
-            ["記述を登録する", "場所が特定できそうな一節を切り出します。特定できていない記述こそ歓迎です。"],
-            ["候補を出す", "地図上の一点と、そう考えた根拠をセットで投稿します。根拠のない候補は投稿できません。"],
-            ["投票する", "納得できる説に賛成、無理があると思う説に反対。同じボタンをもう一度押すと取り消せます。"],
-            ["議論する", "反対票だけ入れて去るより、なぜそう思うかを一行書き残すほうが、地図はずっと良くなります。"],
-          ].map(([t, d], i) => (
-            <li key={t} className="flex gap-4">
-              <span className="font-serif text-lg text-shu">{["一", "二", "三", "四"][i]}</span>
-              <div>
-                <h3 className="font-bold">{t}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-ink-2">{d}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="font-serif text-xl font-bold tracking-wide">引用について</h2>
-        <p className="leading-loose text-ink-2">
-          記述には「本文引用」と「場面の記述」の2種類があります。著作権の保護期間が終わっていない作品では、
-          本文をそのまま写すのではなく、場面を自分の言葉で説明する形をとってください。
-          アニメや映画のように文章のない作品も、場面の記述として登録できます。
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="font-serif text-xl font-bold tracking-wide">注意</h2>
+        <h2 className="font-serif text-xl font-bold tracking-wide">訪ねるときのお願い</h2>
         <ul className="list-disc space-y-2 pl-5 leading-loose text-ink-2">
-          <li>初期データはサンプルです。座標や比定を含め、正確性を保証するものではありません。</li>
           <li>
-            実在の場所には、そこで暮らし、働いている人がいます。私有地や住宅の特定・公開は行わないでください。
+            聖地の多くは、人が暮らし、働いている場所です。住宅街の道、駅のホーム、営業中の店。
+            長時間の滞在、車道での撮影、私有地への立ち入りはやめてください。
           </li>
+          <li>個人の住宅の特定・公開は行わないでください。</li>
+          <li>行き方の欄には、周囲に迷惑をかけずに訪れるための情報を書いてください。</li>
+          <li>初期データはサンプルです。座標や記述の正確性は保証しません。気づいたら直してください。</li>
           <li>地図は OpenStreetMap のデータを利用しています。</li>
         </ul>
       </section>
 
       <div className="flex gap-3 border-t border-rule pt-6">
-        <Link href="/works" className="rounded bg-shu px-5 py-2.5 text-sm font-bold text-paper hover:opacity-90">
-          作品から探す
+        <Link href="/map" className="rounded bg-shu px-5 py-2.5 text-sm font-bold text-paper hover:opacity-90">
+          地図に書き込む
         </Link>
         <Link
-          href="/register"
+          href="/places"
           className="rounded border border-rule-2 px-5 py-2.5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
         >
-          参加する
+          聖地を見てまわる
         </Link>
       </div>
     </div>

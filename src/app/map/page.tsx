@@ -1,12 +1,14 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { MapView, type MapPin } from "@/components/MapView";
-import { Card, ConfidenceBar, Empty } from "@/components/ui";
+import { MapContribute } from "@/components/MapContribute";
+import type { MapPin } from "@/components/MapView";
+import { Card, Empty } from "@/components/ui";
+import { currentUser } from "@/lib/auth";
 import { MEDIUM_LABEL, getPins, listWorks, type Medium } from "@/lib/queries";
 
 export const metadata: Metadata = {
   title: "全国地図",
-  description: "登録されたすべての作品の舞台を、確度つきで日本地図の上に重ねて表示します。",
+  description: "登録されたすべての作品の舞台を日本地図の上に。地図から直接、シーンの場所を書き込めます。",
 };
 
 const FILTERS = [
@@ -20,6 +22,7 @@ export default async function MapPage({
   searchParams: Promise<{ medium?: string; work?: string }>;
 }) {
   const { medium = "all", work: workSlug } = await searchParams;
+  const user = await currentUser();
   const works = listWorks();
   const work = workSlug ? works.find((w) => w.slug === workSlug) : undefined;
   const pins = getPins({ medium, workId: work?.id });
@@ -33,7 +36,10 @@ export default async function MapPage({
     quote: p.quote.length > 70 ? `${p.quote.slice(0, 70)}…` : p.quote,
     confidence: p.confidence,
     primary: p.rank === 0,
-    href: `/passages/${p.passage_id}`,
+    disputed: p.disputed,
+    likes: p.likes,
+    image: p.image_path || undefined,
+    href: `/places/${p.place_id}`,
   }));
 
   const primary = pins.filter((p) => p.rank === 0);
@@ -56,7 +62,7 @@ export default async function MapPage({
       <div className="border-b border-rule pb-4">
         <h1 className="font-serif text-2xl font-bold tracking-wide">全国地図</h1>
         <p className="mt-1 text-sm text-ink-3">
-          {primary.length}件の場所（対立説を含め {pins.length}件のピン）を表示しています。
+          {primary.length}件の場所を表示しています。地図をクリックすれば、その場に直接シーンを書き込めます。
         </p>
       </div>
 
@@ -96,20 +102,17 @@ export default async function MapPage({
         ))}
       </div>
 
-      <Card className="overflow-hidden">
-        {mapPins.length === 0 ? (
-          <div className="p-10">
-            <Empty>条件に合う場所がありません。</Empty>
-          </div>
-        ) : (
-          <MapView pins={mapPins} height={620} />
-        )}
-      </Card>
+      <MapContribute
+        pins={mapPins}
+        works={works.map((w) => ({ id: w.id, title: w.title, author: w.author, medium: w.medium }))}
+        loggedIn={!!user}
+        height={620}
+      />
 
       <section>
         <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">都道府県別</h2>
         {prefs.length === 0 ? (
-          <Empty>表示できる場所がありません。</Empty>
+          <Empty>条件に合う場所がありません。</Empty>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {prefs.map(([pref, items]) => (
@@ -118,17 +121,18 @@ export default async function MapPage({
                   {pref}
                   <span className="text-xs font-normal text-ink-3">{items.length}件</span>
                 </h3>
-                <ul className="mt-3 space-y-2">
+                <ul className="mt-3 space-y-1.5">
                   {items.map((p) => (
                     <li key={p.identification_id}>
-                      <Link href={`/passages/${p.passage_id}`} className="group block">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="truncate text-sm group-hover:text-shu">{p.place_name}</span>
-                          <span className="shrink-0 text-[11px] text-ink-3">{p.work_title}</span>
-                        </div>
-                        <div className="mt-1">
-                          <ConfidenceBar share={p.confidence} showLabel={false} />
-                        </div>
+                      <Link
+                        href={`/places/${p.place_id}`}
+                        className="group flex items-baseline justify-between gap-2"
+                      >
+                        <span className="truncate text-sm group-hover:text-shu">{p.place_name}</span>
+                        <span className="shrink-0 text-[11px] text-ink-3">
+                          {p.likes > 0 && <span className="mr-1.5 text-shu">♥{p.likes}</span>}
+                          {p.work_title}
+                        </span>
                       </Link>
                     </li>
                   ))}

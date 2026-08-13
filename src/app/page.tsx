@@ -1,14 +1,29 @@
 import Link from "next/link";
+import { LikeButton } from "@/components/LikeButton";
 import { MapView, type MapPin } from "@/components/MapView";
-import { Card, ConfidenceBar, ConsensusBadge, Empty, MediumBadge, SectionTitle, Stat } from "@/components/ui";
-import { contestedPassages, getPins, listWorks, recentActivity, siteStats } from "@/lib/queries";
+import { Card, ConfidenceBar, Empty, MediumBadge, SectionTitle, Stat } from "@/components/ui";
+import { currentUser } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { contestedPassages, getPins, listPlaces, listWorks, recentActivity, siteStats } from "@/lib/queries";
 
-export default function Home() {
+const ACTIVITY_LABEL = { scene: "シーン", edit: "加筆", comment: "議論" } as const;
+
+export default async function Home() {
+  const user = await currentUser();
   const stats = siteStats();
   const works = listWorks().slice(0, 6);
   const pins = getPins();
-  const contested = contestedPassages(4);
-  const activity = recentActivity(8);
+  const popular = listPlaces(6, "likes");
+  const contested = contestedPassages(2);
+  const activity = recentActivity(10);
+
+  const likedIds = new Set(
+    user
+      ? (db.prepare("SELECT place_id FROM place_likes WHERE user_id = ?").all(user.id) as { place_id: number }[]).map(
+          (r) => r.place_id,
+        )
+      : [],
+  );
 
   const mapPins: MapPin[] = pins
     .filter((p) => p.rank === 0)
@@ -21,7 +36,10 @@ export default function Home() {
       quote: p.quote.length > 60 ? `${p.quote.slice(0, 60)}…` : p.quote,
       confidence: p.confidence,
       primary: true,
-      href: `/passages/${p.passage_id}`,
+      disputed: p.disputed,
+      likes: p.likes,
+      image: p.image_path || undefined,
+      href: `/places/${p.place_id}`,
     }));
 
   return (
@@ -31,80 +49,77 @@ export default function Home() {
         <div>
           <p className="mb-3 text-xs font-bold tracking-[0.2em] text-shu">みんなで作る、小説とアニメの地図帳</p>
           <h1 className="font-serif text-3xl leading-snug tracking-wide sm:text-4xl">
-            この一行は、
+            物語の場所を、
             <br />
-            現実のどこだろう。
+            みんなで書き足していく。
           </h1>
           <p className="mt-5 max-w-lg leading-loose text-ink-2">
             『三四郎』の精養軒。『こころ』の鎌倉の海。沼津駅のホーム。
-            物語に書かれた場所は、たいてい現実のどこかを指しています。
-            けれど本文にはっきり書かれていないことも多い。
+            どこがどのシーンの場所かは、たいていファンの間ではもう分かっています。
           </p>
           <p className="mt-4 max-w-lg leading-loose text-ink-2">
-            ここは、その<strong className="font-bold text-ink">「本文 → 場所」の対応づけ</strong>
-            を持ち寄る場所です。根拠を添えて候補を出し、議論し、投票する。
-            集まった票から<strong className="font-bold text-ink">確度</strong>が決まり、地図の上に物語が重なっていきます。
+            足りないのは、それが<strong className="font-bold text-ink">一箇所にまとまっていない</strong>こと。
+            だからここでは、場所ごとに<strong className="font-bold text-ink">誰でも書き足せる項目</strong>
+            を作ります。地図をクリックしてシーンを登録し、写真を添え、解説を直す。
+            編集はすべて履歴に残ります。
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <Link href="/works" className="rounded bg-shu px-5 py-2.5 text-sm font-bold text-paper hover:opacity-90">
-              作品から探す
+            <Link href="/map" className="rounded bg-shu px-5 py-2.5 text-sm font-bold text-paper hover:opacity-90">
+              地図に書き込む
             </Link>
             <Link
-              href="/map"
+              href="/places"
               className="rounded border border-rule-2 px-5 py-2.5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
             >
-              全国の地図を見る
+              聖地を見てまわる
             </Link>
           </div>
           <dl className="mt-8 flex flex-wrap gap-x-8 gap-y-4 border-t border-rule pt-6">
+            <Stat label="場所" value={stats.places} unit="件" />
+            <Stat label="シーン" value={stats.passages} unit="件" />
             <Stat label="作品" value={stats.works} unit="作" />
-            <Stat label="登録された場所" value={stats.places} unit="件" />
-            <Stat label="本文の記述" value={stats.passages} unit="件" />
-            <Stat label="投じられた票" value={stats.votes} unit="票" />
-            <Stat label="参加者" value={stats.users} unit="人" />
+            <Stat label="編集" value={stats.edits} unit="回" />
+            <Stat label="いいね" value={stats.likes} unit="件" />
           </dl>
         </div>
 
         <Card className="overflow-hidden">
           <MapView pins={mapPins} height={480} />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule px-4 py-2.5 text-[11px] text-ink-3">
-            <span>ピンの数字と色は確度</span>
             <span className="flex items-center gap-1">
               <i className="inline-block size-2.5 rounded-full" style={{ background: "#b4472e" }} />
-              80%以上
+              定説（ピンの大きさは人気）
             </span>
             <span className="flex items-center gap-1">
-              <i className="inline-block size-2.5 rounded-full" style={{ background: "#c98a2e" }} />
-              55%以上
+              <i className="inline-block size-2.5 rounded-full border border-dashed border-ink-3" />
+              異説あり
             </span>
-            <span className="flex items-center gap-1">
-              <i className="inline-block size-2.5 rounded-full" style={{ background: "#6b8f71" }} />
-              30%以上
-            </span>
-            <span className="ml-auto">Ctrl/⌘ + ホイールで拡大縮小</span>
+            <Link href="/map" className="ml-auto font-bold text-shu hover:underline">
+              地図から書き込む →
+            </Link>
           </div>
         </Card>
       </section>
 
       {/* 仕組み */}
       <section>
-        <SectionTitle more={{ href: "/about", label: "詳しく" }}>解釈が集まると、確度になる</SectionTitle>
+        <SectionTitle more={{ href: "/about", label: "詳しく" }}>三つの積み上げ方</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-3">
           {[
             {
               n: "一",
-              t: "本文の一節を登録する",
-              d: "「彼は駅を出て、坂を下り、海の見える喫茶店に入った。」——場所が特定できそうな記述を切り出します。",
+              t: "地図から、シーンを置く",
+              d: "地図をクリックして「ここは○○の第3話のあの場面」と登録します。アニメならその場面の画像、小説なら本文の描写を添えて。",
             },
             {
               n: "二",
-              t: "候補を、根拠つきで出す",
-              d: "「作者の当時の生活圏から考えると△△駅では」。地図上の一点と、そう考えた理由をセットで投稿します。",
+              t: "場所の項目を書き足す",
+              d: "誰でも編集できます。解説、行き方、注意すべきこと。間違いを直すのも、写真を1枚足すのも同じ貢献です。",
             },
             {
               n: "三",
-              t: "議論して、投票する",
-              d: "票の集まり方から各説の確度が算出されます。対立が続けば、それも含めて記録に残ります。",
+              t: "いいねで残す",
+              d: "行ってよかった場所、よく書けている項目にいいねを。人気の場所はピンが大きくなり、一覧の上に出ます。",
             },
           ].map((s) => (
             <Card key={s.n} className="p-5">
@@ -116,12 +131,101 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 議論が割れている記述 */}
+      {/* 人気の聖地 */}
       <section>
-        <SectionTitle>いま、説が割れている記述</SectionTitle>
-        {contested.length === 0 ? (
-          <Empty>まだ複数の説が並んでいる記述はありません。</Empty>
+        <SectionTitle more={{ href: "/places", label: "すべての場所" }}>いま人気の聖地</SectionTitle>
+        {popular.length === 0 ? (
+          <Empty>まだ場所が登録されていません。</Empty>
         ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {popular.map((p) => (
+              <Card key={p.id} className="flex h-full flex-col overflow-hidden">
+                <Link href={`/places/${p.id}`} className="group flex-1">
+                  {p.photo_path ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.photo_path} alt="" className="h-32 w-full object-cover" />
+                  ) : null}
+                  <div className="p-4">
+                    <h3 className="truncate font-bold group-hover:text-shu">{p.name}</h3>
+                    <p className="mt-0.5 text-xs text-ink-3">{p.prefecture}</p>
+                    {p.note && <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-ink-2">{p.note}</p>}
+                  </div>
+                </Link>
+                <div className="flex items-center justify-between border-t border-rule px-4 py-2.5">
+                  <span className="text-[11px] text-ink-3">
+                    {p.work_count}作品・シーン{p.scene_count}件
+                  </span>
+                  <LikeButton
+                    placeId={p.id}
+                    likes={p.likes}
+                    liked={likedIds.has(p.id)}
+                    loggedIn={!!user}
+                    size="sm"
+                  />
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 更新 */}
+      <section>
+        <SectionTitle>最近の書き込み</SectionTitle>
+        <Card className="divide-y divide-rule">
+          {activity.map((a, i) => (
+            <Link key={i} href={a.href} className="flex gap-3 px-4 py-3 hover:bg-paper-2/50">
+              <span className="mt-0.5 shrink-0 rounded bg-paper-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-3">
+                {ACTIVITY_LABEL[a.kind]}
+              </span>
+              <span className="min-w-0 flex-1 text-sm">
+                <span className="text-ink-2">{a.title}</span>
+                <span className="mt-0.5 block truncate text-xs text-ink-3">{a.context}</span>
+              </span>
+              <span className="shrink-0 text-xs text-ink-3">{a.actor}</span>
+            </Link>
+          ))}
+        </Card>
+      </section>
+
+      {/* 作品 */}
+      <section>
+        <SectionTitle more={{ href: "/works", label: "すべての作品" }}>作品から探す</SectionTitle>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {works.map((w) => (
+            <Link key={w.id} href={`/works/${w.slug}`} className="group">
+              <Card className="h-full p-5 transition group-hover:shadow-[0_4px_16px_rgba(36,33,29,0.07)]">
+                <div className="flex items-center gap-2">
+                  <MediumBadge medium={w.medium} />
+                  <span className="text-xs text-ink-3">{w.year}</span>
+                </div>
+                <h3 className="mt-2 font-serif text-xl font-bold group-hover:text-shu">{w.title}</h3>
+                <p className="text-sm text-ink-3">{w.author}</p>
+                <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-ink-2">{w.description}</p>
+                <div className="mt-4 flex gap-4 border-t border-rule pt-3 text-xs text-ink-3">
+                  <span>
+                    場所 <b className="font-bold text-ink-2">{w.place_count}</b>
+                  </span>
+                  <span>
+                    シーン <b className="font-bold text-ink-2">{w.passage_count}</b>
+                  </span>
+                  <span>
+                    参加 <b className="font-bold text-ink-2">{w.contributor_count}</b>人
+                  </span>
+                </div>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* 割れているものだけ、控えめに */}
+      {contested.length > 0 && (
+        <section>
+          <SectionTitle>まれに、説が割れることがある</SectionTitle>
+          <p className="-mt-1 mb-3 text-sm text-ink-3">
+            ほとんどの場所は決まっています。決まらないものだけ、根拠を出し合って確度で並べています。
+          </p>
           <div className="grid gap-4 md:grid-cols-2">
             {contested.map((p) => (
               <Card key={p.id} className="p-5">
@@ -130,7 +234,6 @@ export default function Home() {
                     {p.work_title}
                   </Link>
                   {p.chapter && <span>{p.chapter}</span>}
-                  <ConsensusBadge level={p.consensus} />
                 </div>
                 <Link href={`/passages/${p.id}`} className="group">
                   <p className="mt-2 line-clamp-2 font-serif leading-relaxed group-hover:text-shu">
@@ -145,74 +248,11 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <Link href={`/passages/${p.id}`} className="mt-3 inline-block text-xs text-shu hover:underline">
-                  議論に参加する（{p.comment_count}件のコメント）→
-                </Link>
               </Card>
             ))}
           </div>
-        )}
-      </section>
-
-      {/* 作品 */}
-      <section>
-        <SectionTitle more={{ href: "/works", label: "すべての作品" }}>作品から探す</SectionTitle>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {works.map((w) => (
-            <Link key={w.id} href={`/works/${w.slug}`} className="group">
-              <Card className="h-full p-5 transition group-hover:border-rule-2 group-hover:shadow-[0_4px_16px_rgba(36,33,29,0.07)]">
-                <div className="flex items-center gap-2">
-                  <MediumBadge medium={w.medium} />
-                  <span className="text-xs text-ink-3">{w.year}</span>
-                </div>
-                <h3 className="mt-2 font-serif text-xl font-bold group-hover:text-shu">{w.title}</h3>
-                <p className="text-sm text-ink-3">{w.author}</p>
-                <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-ink-2">{w.description}</p>
-                <div className="mt-4 flex gap-4 border-t border-rule pt-3 text-xs text-ink-3">
-                  <span>
-                    場所 <b className="font-bold text-ink-2">{w.place_count}</b>
-                  </span>
-                  <span>
-                    記述 <b className="font-bold text-ink-2">{w.passage_count}</b>
-                  </span>
-                  <span>
-                    参加 <b className="font-bold text-ink-2">{w.contributor_count}</b>人
-                  </span>
-                </div>
-              </Card>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* 更新 */}
-      <section>
-        <SectionTitle>最近の更新</SectionTitle>
-        <Card className="divide-y divide-rule">
-          {activity.map((a, i) => (
-            <Link key={i} href={`/passages/${a.passage_id}`} className="flex gap-3 px-4 py-3 hover:bg-paper-2/50">
-              <span className="mt-0.5 shrink-0 rounded bg-paper-2 px-1.5 py-0.5 text-[10px] font-bold text-ink-3">
-                {a.kind === "identification" ? "比定" : a.kind === "comment" ? "議論" : "記述"}
-              </span>
-              <span className="min-w-0 flex-1 text-sm">
-                <span className="text-ink-2">
-                  {a.kind === "identification" && (
-                    <>
-                      <b className="font-bold text-ink">{a.detail}</b> を候補として登録
-                    </>
-                  )}
-                  {a.kind === "comment" && <>{a.detail}…</>}
-                  {a.kind === "passage" && <>記述を追加</>}
-                </span>
-                <span className="mt-0.5 block truncate text-xs text-ink-3">
-                  {a.work_title}｜{a.quote}
-                </span>
-              </span>
-              <span className="shrink-0 text-xs text-ink-3">{a.actor}</span>
-            </Link>
-          ))}
-        </Card>
-      </section>
+        </section>
+      )}
     </div>
   );
 }
