@@ -75,7 +75,7 @@ export default async function WorksPage({
                     場所 <b className="font-bold text-ink-2">{w.place_count}</b>
                   </span>
                   <span>
-                    記述 <b className="font-bold text-ink-2">{w.passage_count}</b>
+                    シーン <b className="font-bold text-ink-2">{w.passage_count}</b>
                   </span>
                   <span>
                     参加 <b className="font-bold text-ink-2">{w.contributor_count}</b>人
