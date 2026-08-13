@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { editPlaceAction, type FormState } from "@/app/actions";
-import { PlacePicker } from "./MapView";
+import { AreaSearch } from "./AreaSearch";
+import { PlacePicker, type MapFocus } from "./MapView";
 import type { Place } from "@/lib/queries";
 
 const field = "w-full rounded border border-rule-2 bg-card px-3 py-2.5 text-sm outline-none focus:border-shu";
@@ -12,6 +13,7 @@ export function PlaceEditForm({ place }: { place: Place }) {
   const [state, action, pending] = useActionState<FormState, FormData>(editPlaceAction, {});
   const [coords, setCoords] = useState({ lat: place.lat, lng: place.lng });
   const [removePhoto, setRemovePhoto] = useState(false);
+  const [focus, setFocus] = useState<MapFocus | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
   return (
@@ -51,7 +53,13 @@ export function PlaceEditForm({ place }: { place: Place }) {
       <section className="space-y-2">
         <h2 className="border-b border-rule pb-1.5 font-serif text-base font-bold">位置</h2>
         <div className="overflow-hidden rounded border border-rule">
-          <PlacePicker value={coords} onChange={setCoords} height={280} />
+          <div className="border-b border-rule p-2">
+            <AreaSearch
+              placeholder="市区町村・地名で地図を移動"
+              onSelect={(h) => setFocus({ lat: h.lat, lng: h.lng, zoom: h.zoom, bounds: h.bounds, nonce: Date.now() })}
+            />
+          </div>
+          <PlacePicker value={coords} onChange={setCoords} height={280} focus={focus} />
           <p className="border-t border-rule bg-card px-3 py-2 text-xs tabular-nums text-ink-3">
             {coords.lat}, {coords.lng}（地図をクリック、またはピンをドラッグ）
           </p>

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useState } from "react";
 import { addSceneAction, type FormState } from "@/app/actions";
-import { PlacePicker } from "./MapView";
+import { AreaSearch } from "./AreaSearch";
+import { PlacePicker, type MapFocus } from "./MapView";
 import { SceneFields } from "./SceneFields";
 import { WorkCombobox, type WorkOption } from "./WorkCombobox";
 
@@ -33,6 +34,7 @@ export function SceneForm({
     fixedPlace ? { ...fixedPlace, address: "" } : null,
   );
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [focus, setFocus] = useState<MapFocus | null>(null);
 
   useEffect(() => {
     if (fixedPlace || place || mode !== "existing" || !query.trim()) {
@@ -159,7 +161,15 @@ export function SceneForm({
                   <input name="address" placeholder="住所" className={field} />
                 </div>
                 <div className="overflow-hidden rounded border border-rule">
-                  <PlacePicker value={coords} onChange={setCoords} height={260} />
+                  <div className="border-b border-rule p-2">
+                    <AreaSearch
+                      placeholder="市区町村・地名で地図を移動（例：新宿区）"
+                      onSelect={(h) =>
+                        setFocus({ lat: h.lat, lng: h.lng, zoom: h.zoom, bounds: h.bounds, nonce: Date.now() })
+                      }
+                    />
+                  </div>
+                  <PlacePicker value={coords} onChange={setCoords} height={260} focus={focus} />
                   <p className="border-t border-rule bg-card px-3 py-2 text-xs tabular-nums text-ink-3">
                     {coords ? `${coords.lat}, ${coords.lng}` : "地図をクリックして位置を指定してください"}
                   </p>

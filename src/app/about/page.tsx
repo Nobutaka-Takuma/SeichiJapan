@@ -64,6 +64,10 @@ export default function AboutPage() {
         <Card className="p-6">
           <ol className="space-y-3 text-sm leading-relaxed text-ink-2">
             <li>
+              <b className="text-ink">0.</b> 地図の上の検索欄に「新宿区」「沼津市」のような地名を入れると、
+              その周辺まで一息で移動します。目的地まで何度も拡大縮小する必要はありません
+            </li>
+            <li>
               <b className="text-ink">1.</b> 地図をクリックして地点を決める（ピンはドラッグで微調整できます）
             </li>
             <li>

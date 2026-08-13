@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { addSceneAction, type FormState } from "@/app/actions";
-import { MapView, type MapPin } from "./MapView";
+import { AreaSearch } from "./AreaSearch";
+import { MapView, type MapFocus, type MapPin } from "./MapView";
 import { SceneFields } from "./SceneFields";
 import { WorkCombobox } from "./WorkCombobox";
 
@@ -30,6 +31,7 @@ export function MapContribute({
   const [target, setTarget] = useState<NearbyPlace | "new" | null>(null);
   const [state, action, pending] = useActionState<FormState & { placeId?: number }, FormData>(addSceneAction, {});
   const panelRef = useRef<HTMLDivElement>(null);
+  const [focus, setFocus] = useState<MapFocus | null>(null);
 
   // 地点が決まったら、近くの登録済みの場所を引く
   useEffect(() => {
@@ -63,25 +65,29 @@ export function MapContribute({
     <div className="grid gap-4 lg:grid-cols-[1fr_380px] lg:items-start">
       <div className="overflow-hidden rounded-lg border border-rule bg-card">
         <div className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-2.5">
+          <AreaSearch
+            className="w-full sm:w-80"
+            onSelect={(h) =>
+              setFocus({ lat: h.lat, lng: h.lng, zoom: h.zoom, bounds: h.bounds, nonce: Date.now() })
+            }
+          />
           {loggedIn ? (
             <button
               type="button"
               onClick={() => (picking ? reset() : setPicking(true))}
-              className={`rounded px-3 py-1.5 text-xs font-bold ${
+              className={`shrink-0 rounded px-3 py-2 text-xs font-bold ${
                 picking ? "bg-ink text-paper" : "bg-shu text-paper hover:opacity-90"
               }`}
             >
               {picking ? "書き込みをやめる" : "＋ 地図に書き込む"}
             </button>
           ) : (
-            <Link href="/login?next=/map" className="rounded bg-shu px-3 py-1.5 text-xs font-bold text-paper">
+            <Link href="/login?next=/map" className="shrink-0 rounded bg-shu px-3 py-2 text-xs font-bold text-paper">
               ログインして地図に書き込む
             </Link>
           )}
           <p className="text-xs text-ink-3">
-            {picking
-              ? "地図の上で、シーンの場所をクリックしてください"
-              : "「ここは、あの作品のあのシーンの場所」を地図から直接登録できます"}
+            {picking ? "地図の上で、シーンの場所をクリックしてください" : "地名を入れると、その周辺まで一息で移動します"}
           </p>
         </div>
         <MapView
@@ -90,7 +96,8 @@ export function MapContribute({
           picking={picking}
           picked={picked}
           onPick={(v) => setPicked(v)}
-          fit={!picked}
+          fit={!picked && !focus}
+          focus={focus}
         />
       </div>
 

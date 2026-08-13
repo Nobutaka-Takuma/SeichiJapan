@@ -169,6 +169,7 @@ export function WorkCombobox({
       <input
         type="text"
         role="combobox"
+        aria-label="作品を検索して選ぶ"
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"

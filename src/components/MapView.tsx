@@ -26,6 +26,15 @@ const TILE_ATTR =
 
 const JAPAN_CENTER: [number, number] = [36.2, 138.2];
 
+/** 地図を動かす指示。同じ場所を続けて選んでも動くよう nonce を持たせる。 */
+export type MapFocus = {
+  lat: number;
+  lng: number;
+  zoom?: number;
+  bounds?: [[number, number], [number, number]];
+  nonce: number;
+};
+
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
@@ -85,6 +94,7 @@ export function MapView({
   picking = false,
   picked = null,
   onPick,
+  focus,
 }: {
   pins: MapPin[];
   height?: number | string;
@@ -96,6 +106,8 @@ export function MapView({
   picking?: boolean;
   picked?: { lat: number; lng: number } | null;
   onPick?: (v: { lat: number; lng: number }) => void;
+  /** 地名検索などから、表示範囲を移す指示。nonce が変わるたびに動く。 */
+  focus?: MapFocus | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LType.Map | null>(null);
@@ -184,6 +196,27 @@ export function MapView({
     }
   }, [leaflet, pins, fit, picking]);
 
+  // 地名検索などからの移動指示
+  useEffect(() => {
+    const L = leaflet;
+    const map = mapRef.current;
+    if (!L || !map || !focus) return;
+
+    if (focus.bounds) {
+      const [[s, w], [n, e]] = focus.bounds;
+      // 一点しかない市区町村は範囲が潰れるので、その場合は座標へ寄せる
+      if (Math.abs(n - s) < 0.002 && Math.abs(e - w) < 0.002) {
+        map.flyTo([focus.lat, focus.lng], focus.zoom ?? 15, { duration: 0.8 });
+      } else {
+        map.flyToBounds(L.latLngBounds([s, w], [n, e]), { padding: [48, 48], maxZoom: 16, duration: 0.8 });
+      }
+    } else {
+      map.flyTo([focus.lat, focus.lng], focus.zoom ?? 14, { duration: 0.8 });
+    }
+    // nonce が変わったときだけ動かす
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaflet, focus?.nonce]);
+
   // 選択中の地点を示すピン
   useEffect(() => {
     const L = leaflet;
@@ -232,10 +265,12 @@ export function PlacePicker({
   value,
   onChange,
   height = 320,
+  focus,
 }: {
   value: { lat: number; lng: number } | null;
   onChange: (v: { lat: number; lng: number }) => void;
   height?: number;
+  focus?: MapFocus | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LType.Map | null>(null);
@@ -253,6 +288,7 @@ export function PlacePicker({
     if (!L || !ref.current || mapRef.current) return;
     const map = L.map(ref.current, { center: value ? [value.lat, value.lng] : JAPAN_CENTER, zoom: value ? 14 : 5 });
     L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 18 }).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
 
     const icon = L.divIcon({
       className: "",
@@ -282,6 +318,24 @@ export function PlacePicker({
     // 初期化は一度だけ。value の追従は place() 側で行う。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaflet]);
+
+  // 地名検索からの移動指示
+  useEffect(() => {
+    const L = leaflet;
+    const map = mapRef.current;
+    if (!L || !map || !focus) return;
+    if (focus.bounds) {
+      const [[s, w], [n, e]] = focus.bounds;
+      if (Math.abs(n - s) < 0.002 && Math.abs(e - w) < 0.002) {
+        map.flyTo([focus.lat, focus.lng], focus.zoom ?? 16, { duration: 0.8 });
+      } else {
+        map.flyToBounds(L.latLngBounds([s, w], [n, e]), { padding: [40, 40], maxZoom: 17, duration: 0.8 });
+      }
+    } else {
+      map.flyTo([focus.lat, focus.lng], focus.zoom ?? 16, { duration: 0.8 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaflet, focus?.nonce]);
 
   return <div ref={ref} style={{ height: `${height}px`, width: "100%" }} aria-label="場所を選ぶ地図" />;
 }
