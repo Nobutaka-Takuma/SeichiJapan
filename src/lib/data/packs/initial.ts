@@ -1,8 +1,7 @@
-import type Database from "better-sqlite3";
-import { hashPassword } from "./password";
+import type { DataPack, SeedContributor, SeedEdit, SeedPlace, SeedWork } from "../types";
 
 /**
- * 初期データ。
+ * 最初に投入されるデータ。
  *
  * 本文の引用はパブリックドメイン作品（夏目漱石・川端康成）のみ verbatim で収録し、
  * 著作権の生きている作品は「場面の記述」（kind='scene'）として要約で登録している。
@@ -10,39 +9,7 @@ import { hashPassword } from "./password";
  * ——それを利用者の手で直していくことがこのサービスの目的。
  */
 
-export const DEMO_PASSWORD = "seichi2024";
-
-type SeedIdent = {
-  place: string;
-  rationale: string;
-  evidence?: "guess" | "research" | "official";
-  source_url?: string;
-  by: string;
-  up: number;
-  down?: number;
-};
-
-type SeedPassage = {
-  chapter?: string;
-  kind?: "text" | "scene";
-  quote: string;
-  note?: string;
-  by: string;
-  idents: SeedIdent[];
-  comments?: { by: string; body: string; on?: string }[];
-};
-
-type SeedWork = {
-  slug: string;
-  title: string;
-  author: string;
-  medium: "novel" | "anime" | "manga" | "film";
-  year: number;
-  description: string;
-  passages: SeedPassage[];
-};
-
-const CONTRIBUTORS: { handle: string; name: string; bio: string }[] = [
+const CONTRIBUTORS: SeedContributor[] = [
   { handle: "soseki_walk", name: "漱石散歩", bio: "漱石作品の舞台を歩いて確かめています。明治期の東京市街図が愛読書。" },
   { handle: "kobo_map", name: "古地図倶楽部", bio: "明治・大正の地形図と現在地の照合が趣味。道の勾配から場所を割り出します。" },
   { handle: "kamakura_lo", name: "鎌倉在住", bio: "鎌倉生まれ。海と谷戸のことなら少しは分かります。" },
@@ -59,15 +26,6 @@ const CONTRIBUTORS: { handle: string; name: string; bio: string }[] = [
   { handle: "shitamachi", name: "下町ノート", bio: "浅草・向島あたりの古い写真と現在地を突き合わせています。" },
   { handle: "odakyu_f", name: "小田急沿線", bio: "参宮橋から代々木八幡のあたりを毎日通ります。" },
 ];
-
-/** 投票プールとなる一般ユーザーのハンドルを決定的に生成する。 */
-function voterHandles(): string[] {
-  const heads = ["yomite", "aruki", "shiori", "hyoushi", "kaidoku", "michikusa", "hondana", "kikou"];
-  const tails = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"];
-  const out: string[] = [];
-  for (const h of heads) for (const t of tails) out.push(`${h}_${t}`);
-  return out; // 80人
-}
 
 const WORKS: SeedWork[] = [
   {
@@ -1010,17 +968,6 @@ const WORKS: SeedWork[] = [
   },
 ];
 
-type SeedPlace = {
-  lat: number;
-  lng: number;
-  pref: string;
-  address?: string;
-  note?: string;
-  body?: string;
-  access?: string;
-  likes?: number;
-};
-
 const PLACES: Record<string, SeedPlace> = {
   由比ヶ浜: { lat: 35.3085, lng: 139.5391, pref: "神奈川県", address: "鎌倉市由比ガ浜", note: "鎌倉を代表する海岸。明治期から海水浴場として賑わった。", body: "鎌倉市南部、相模湾に面した砂浜。滑川の河口を境に、西側を由比ヶ浜、東側を材木座海岸と呼び分けるのが一般的だが、広い意味では一続きの浜として扱われることも多い。\n\n■ 明治期の海水浴場\n明治中期以降、鎌倉は東京からの避暑地として整備が進み、海水浴場としてもっとも賑わったのがこの浜だった。当時は現在の海の家にあたる「掛茶屋」が並び、夏のあいだ客が集まった。近代文学に出てくる「鎌倉の海」の多くは、この情景を下敷きにしている。\n\n■ 作品での扱い\n『こころ』で「私」が先生を見かける海水浴場は、作中では固有名が示されない。掛茶屋の描写や人出の多さから由比ヶ浜とする見方が有力だが、材木座を推す説もある。", access: "江ノ島電鉄「由比ヶ浜駅」から徒歩5分ほど。鎌倉駅からも歩ける。夏季は海水浴客で非常に混雑する。", likes: 34 },
   材木座海岸: { lat: 35.308, lng: 139.549, pref: "神奈川県", address: "鎌倉市材木座", note: "滑川を挟んで由比ヶ浜の東側に続く海岸。", body: "滑川を挟んで由比ヶ浜の東側に続く砂浜。かつて材木の集積地であったことが名の由来とされる。由比ヶ浜に比べると人出は落ち着いている。", access: "鎌倉駅から徒歩15分ほど。", likes: 6 },
@@ -1334,207 +1281,58 @@ const PLACES: Record<string, SeedPlace> = {
   },
 };
 
-export function seedIfEmpty(db: Database.Database) {
-  const isEmpty = () => (db.prepare("SELECT COUNT(*) AS n FROM works").get() as { n: number }).n === 0;
-  if (!isEmpty()) return;
+const EDITS: SeedEdit[] = [
+  {
+    place: "鎌倉高校前1号踏切",
+    by: "shonan_rail",
+    summary: "訪問マナーの注意を追記",
+    append:
+      "■ 近年の状況\n訪れる人の増加にともない、周辺では通行や撮影をめぐる問題が起きている。地元自治体や鉄道会社から注意の呼びかけが出ることもある。信号と踏切の遮断機に従い、車道に出ないこと。",
+  },
+  {
+    place: "須賀神社 男坂",
+    by: "trip_log",
+    summary: "階段の位置と行き方を補足",
+    append:
+      "■ 現地の様子\n階段の下からと上からでは印象がまったく違う。作中の構図に近いのは、坂の下から見上げる角度。周囲は住宅で、朝夕は通勤・通学の人が通る。",
+    access: "JR・東京メトロ「四ツ谷駅」または「四谷三丁目駅」から徒歩10分ほど。周辺に駐車場はありません。",
+  },
+  {
+    place: "道後温泉本館",
+    by: "matsuyama_k",
+    summary: "建物の説明を加筆",
+    append:
+      "■ 又新殿\n本館には皇室専用の浴室である又新殿が設けられている。一般の入浴はできないが、館内見学の対象になることがある。",
+  },
+  {
+    place: "沼津駅",
+    by: "numazu_p",
+    summary: "バスの案内を修正",
+    append: "■ 内浦へ\n内浦・三津方面のバスは南口から。本数が少ない時間帯があるため、帰りの便も先に確認しておきたい。",
+  },
+  {
+    place: "秋葉原ラジオ会館",
+    by: "trip_log",
+    summary: "建て替え前後の見分け方を追記",
+    append:
+      "■ 見分け方\n旧館は外壁のタイルが濃く、屋上に細かい看板が林立していた。現在の建物は白を基調とし、屋上はすっきりしている。作中のカットと現地を見比べるときは、まずここを確認するとよい。",
+  },
+  {
+    place: "新宿御苑",
+    by: "shinjuku_ame",
+    summary: "雨の日の注意を追記",
+    append:
+      "■ 雨の日に行く人へ\n作品にならって雨の日に訪れる人が多いが、園路は滑りやすく、東屋は数が限られている。先客がいたら譲り合いを。強風雨の日は臨時休園になることがある。",
+    access:
+      "東京メトロ丸ノ内線「新宿御苑前駅」から徒歩5分。JR「新宿駅」南口からは徒歩10分ほど。休園日は月曜（祝日の場合は翌日）。荒天時は臨時休園になることがあります。",
+  },
+];
 
-  const pw = hashPassword(DEMO_PASSWORD); // 全サンプルユーザー共通
-
-  const insertUser = db.prepare(
-    "INSERT INTO users (handle, display_name, bio, password_hash) VALUES (?, ?, ?, ?)",
-  );
-  const insertPlace = db.prepare(
-    `INSERT INTO places (name, lat, lng, prefecture, address, note, body, access, created_by, updated_at, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
-  );
-  const insertRevision = db.prepare(
-    `INSERT INTO place_revisions
-       (place_id, editor_id, name, lat, lng, prefecture, address, note, body, access, photo_path, summary)
-     SELECT id, ?, name, lat, lng, prefecture, address, note, body, access, photo_path, ?
-       FROM places WHERE id = ?`,
-  );
-  const insertLike = db.prepare("INSERT OR IGNORE INTO place_likes (place_id, user_id) VALUES (?, ?)");
-  const insertPassageRevision = db.prepare(
-    `INSERT INTO passage_revisions
-       (passage_id, editor_id, chapter, kind, quote, note, image_path, image_caption, image_credit, summary)
-     SELECT id, ?, chapter, kind, quote, note, image_path, image_caption, image_credit, ?
-       FROM passages WHERE id = ?`,
-  );
-  const insertWork = db.prepare(
-    "INSERT INTO works (slug, title, author, medium, year, description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
-  const insertPassage = db.prepare(
-    "INSERT INTO passages (work_id, chapter, kind, quote, note, sort_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
-  const insertIdent = db.prepare(
-    "INSERT INTO identifications (passage_id, place_id, rationale, evidence, source_url, created_by) VALUES (?, ?, ?, ?, ?, ?)",
-  );
-  const insertVote = db.prepare(
-    "INSERT OR IGNORE INTO votes (identification_id, user_id, value) VALUES (?, ?, ?)",
-  );
-  const insertComment = db.prepare(
-    "INSERT INTO comments (passage_id, identification_id, user_id, body) VALUES (?, ?, ?, ?)",
-  );
-
-  // 複数プロセスが同時に起動しても二重投入にならないよう、
-  // 書き込みロックを取ってから中でもう一度確認する。
-  db.transaction(() => {
-    if (!isEmpty()) return;
-
-    const userId: Record<string, number> = {};
-    for (const c of CONTRIBUTORS) {
-      userId[c.handle] = insertUser.run(c.handle, c.name, c.bio, pw).lastInsertRowid as number;
-    }
-    const voters: number[] = [];
-    for (const h of voterHandles()) {
-      voters.push(insertUser.run(h, h, "", pw).lastInsertRowid as number);
-    }
-
-    const placeId: Record<string, number> = {};
-    let likeCursor = 0;
-    for (const [name, p] of Object.entries(PLACES)) {
-      const author = userId["trip_log"];
-      const id = insertPlace.run(
-        name,
-        p.lat,
-        p.lng,
-        p.pref,
-        p.address ?? "",
-        p.note ?? "",
-        p.body ?? "",
-        p.access ?? "",
-        author,
-        author,
-      ).lastInsertRowid as number;
-      placeId[name] = id;
-
-      // 最初の版として、いまの状態を履歴に残す
-      insertRevision.run(author, "新規作成", id);
-
-      // いいねを配る。投票と同じ要領で投稿者をずらす。
-      for (let i = 0; i < (p.likes ?? 0); i++) {
-        insertLike.run(id, voters[(likeCursor + i) % voters.length]);
-      }
-      likeCursor = (likeCursor + (p.likes ?? 0) + 3) % voters.length;
-    }
-
-    // 後からの加筆を再現して、履歴に複数の版が並ぶようにする
-    const laterEdits: { place: string; by: string; summary: string; append: string; access?: string }[] = [
-      {
-        place: "鎌倉高校前1号踏切",
-        by: "shonan_rail",
-        summary: "訪問マナーの注意を追記",
-        append:
-          "■ 近年の状況\n訪れる人の増加にともない、周辺では通行や撮影をめぐる問題が起きている。地元自治体や鉄道会社から注意の呼びかけが出ることもある。信号と踏切の遮断機に従い、車道に出ないこと。",
-      },
-      {
-        place: "須賀神社 男坂",
-        by: "trip_log",
-        summary: "階段の位置と行き方を補足",
-        append:
-          "■ 現地の様子\n階段の下からと上からでは印象がまったく違う。作中の構図に近いのは、坂の下から見上げる角度。周囲は住宅で、朝夕は通勤・通学の人が通る。",
-        access: "JR・東京メトロ「四ツ谷駅」または「四谷三丁目駅」から徒歩10分ほど。周辺に駐車場はありません。",
-      },
-      {
-        place: "道後温泉本館",
-        by: "matsuyama_k",
-        summary: "建物の説明を加筆",
-        append:
-          "■ 又新殿\n本館には皇室専用の浴室である又新殿が設けられている。一般の入浴はできないが、館内見学の対象になることがある。",
-      },
-      {
-        place: "沼津駅",
-        by: "numazu_p",
-        summary: "バスの案内を修正",
-        append: "■ 内浦へ\n内浦・三津方面のバスは南口から。本数が少ない時間帯があるため、帰りの便も先に確認しておきたい。",
-      },
-      {
-        place: "秋葉原ラジオ会館",
-        by: "trip_log",
-        summary: "建て替え前後の見分け方を追記",
-        append:
-          "■ 見分け方\n旧館は外壁のタイルが濃く、屋上に細かい看板が林立していた。現在の建物は白を基調とし、屋上はすっきりしている。作中のカットと現地を見比べるときは、まずここを確認するとよい。",
-      },
-      {
-        place: "新宿御苑",
-        by: "shinjuku_ame",
-        summary: "雨の日の注意を追記",
-        append:
-          "■ 雨の日に行く人へ\n作品にならって雨の日に訪れる人が多いが、園路は滑りやすく、東屋は数が限られている。先客がいたら譲り合いを。強風雨の日は臨時休園になることがある。",
-        access:
-          "東京メトロ丸ノ内線「新宿御苑前駅」から徒歩5分。JR「新宿駅」南口からは徒歩10分ほど。休園日は月曜（祝日の場合は翌日）。荒天時は臨時休園になることがあります。",
-      },
-    ];
-
-    const applyEdit = db.prepare(
-      `UPDATE places
-          SET body = TRIM(body || char(10) || char(10) || @append),
-              access = COALESCE(NULLIF(@access, ''), access),
-              updated_at = datetime('now'), updated_by = @editor
-        WHERE id = @id`,
-    );
-    for (const e of laterEdits) {
-      const id = placeId[e.place];
-      if (!id) continue;
-      applyEdit.run({ id, append: e.append, access: e.access ?? "", editor: userId[e.by] });
-      insertRevision.run(userId[e.by], e.summary, id);
-    }
-
-    // 票を配るカーソル。案ごとに投票者をずらして重複を避ける。
-    let cursor = 0;
-    const castVotes = (identId: number, up: number, down: number) => {
-      for (let i = 0; i < up + down; i++) {
-        const uid = voters[(cursor + i) % voters.length];
-        insertVote.run(identId, uid, i < up ? 1 : -1);
-      }
-      cursor = (cursor + up + down + 7) % voters.length;
-    };
-
-    for (const w of WORKS) {
-      const wid = insertWork.run(
-        w.slug,
-        w.title,
-        w.author,
-        w.medium,
-        w.year,
-        w.description,
-        userId["bungei_ta"],
-      ).lastInsertRowid as number;
-
-      w.passages.forEach((p, i) => {
-        const pid = insertPassage.run(
-          wid,
-          p.chapter ?? "",
-          p.kind ?? "scene",
-          p.quote,
-          p.note ?? "",
-          i,
-          userId[p.by],
-        ).lastInsertRowid as number;
-
-        // 場所と同じく、最初の版を履歴に残す（初回の編集も差し戻せるように）
-        insertPassageRevision.run(userId[p.by], "新規作成", pid);
-
-        const identIdByPlace: Record<string, number> = {};
-        for (const idt of p.idents) {
-          const iid = insertIdent.run(
-            pid,
-            placeId[idt.place],
-            idt.rationale,
-            idt.evidence ?? "guess",
-            idt.source_url ?? "",
-            userId[idt.by],
-          ).lastInsertRowid as number;
-          identIdByPlace[idt.place] = iid;
-          castVotes(iid, idt.up, idt.down ?? 0);
-          // 提案者自身の1票
-          insertVote.run(iid, userId[idt.by], 1);
-        }
-
-        for (const c of p.comments ?? []) {
-          insertComment.run(pid, c.on ? identIdByPlace[c.on] : null, userId[c.by], c.body);
-        }
-      });
-    }
-  }).immediate();
-}
+export const initialPack: DataPack = {
+  id: "0001-initial",
+  description: "漱石・川端の作品と、東京近辺を中心としたアニメ・映画の聖地",
+  contributors: CONTRIBUTORS,
+  works: WORKS,
+  places: PLACES,
+  edits: EDITS,
+};

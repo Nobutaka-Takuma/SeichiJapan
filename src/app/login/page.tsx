@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/components/AuthForm";
 import { Card } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
-import { DEMO_PASSWORD } from "@/lib/seed";
+import { DEMO_PASSWORD } from "@/lib/data";
 
 export const metadata: Metadata = { title: "ログイン" };
 

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { seedIfEmpty } from "./seed";
+import { seedDatabase } from "./data";
 
 const DB_PATH = process.env.SEICHI_DB ?? path.join(process.cwd(), "data", "seichi.db");
 
@@ -209,7 +209,7 @@ function open(): Database.Database {
     try {
       db.exec(SCHEMA);
       migrate(db);
-      seedIfEmpty(db);
+      seedDatabase(db);
       break;
     } catch (e) {
       if (!isBusy(e) || i >= 6) throw e;
