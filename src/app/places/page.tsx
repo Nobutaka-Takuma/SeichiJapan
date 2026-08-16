@@ -66,7 +66,7 @@ export default async function PlacesPage({
             <Link
               key={s.key}
               href={`/places?${new URLSearchParams({ ...(term ? { q: term } : {}), sort: s.key })}`}
-              className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+              className={`rounded-full px-3.5 py-2.5 text-xs font-bold sm:px-3 sm:py-1.5 ${
                 key === s.key ? "bg-ink text-paper" : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
               }`}
             >

@@ -3,8 +3,16 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { MapView } from "@/components/MapView";
+import { VisitButton } from "@/components/VisitButton";
 import { Card, MediumBadge, PassageQuote } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
+import {
+  backlinks,
+  getVisitState,
+  relatedPlaces,
+  resolveWikiLinks,
+  routesForPlace,
+} from "@/lib/pilgrimage";
 import { getAppearances, getPlace } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -18,8 +26,46 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   };
 }
 
-/** 記事本文。空行で段落、行頭の「■」を小見出しとして扱う。 */
-function Article({ body }: { body: string }) {
+/**
+ * 記事本文。
+ * 空行で段落、行頭の「■」を小見出し、[[名前]] を他の項目へのリンクとして扱う。
+ */
+function Article({ body, links, self }: { body: string; links: Map<string, number>; self: number }) {
+  const inline = (text: string, keyBase: string) => {
+    const parts: React.ReactNode[] = [];
+    let last = 0;
+    for (const m of text.matchAll(/\[\[([^\]]{1,60})\]\]/g)) {
+      const name = m[1];
+      if (m.index! > last) parts.push(text.slice(last, m.index));
+      const id = links.get(name);
+      parts.push(
+        id === self ? (
+          // 自分自身へのリンクは張らない（辞典の作法にならう）
+          <b key={`${keyBase}-${m.index}`} className="font-bold text-ink">
+            {name}
+          </b>
+        ) : id ? (
+          <Link key={`${keyBase}-${m.index}`} href={`/places/${id}`} className="text-ai underline decoration-ai/40 underline-offset-2 hover:text-shu">
+            {name}
+          </Link>
+        ) : (
+          // まだ項目が無い名前。書けば埋まることが分かるようにしておく
+          <Link
+            key={`${keyBase}-${m.index}`}
+            href={`/places?q=${encodeURIComponent(name)}`}
+            className="text-ink-3 underline decoration-dotted underline-offset-2"
+            title="この項目はまだありません"
+          >
+            {name}
+          </Link>
+        ),
+      );
+      last = m.index! + m[0].length;
+    }
+    if (last < text.length) parts.push(text.slice(last));
+    return parts;
+  };
+
   const blocks = body.split(/\n{2,}/).filter((b) => b.trim());
   return (
     <div className="space-y-4">
@@ -33,14 +79,14 @@ function Article({ body }: { body: string }) {
                 {head.replace(/^■\s*/, "")}
               </h3>
               {rest.length > 0 && (
-                <p className="whitespace-pre-wrap leading-loose text-ink-2">{rest.join("\n")}</p>
+                <p className="whitespace-pre-wrap leading-loose text-ink-2">{inline(rest.join("\n"), `b${i}`)}</p>
               )}
             </div>
           );
         }
         return (
           <p key={i} className="whitespace-pre-wrap leading-loose text-ink-2">
-            {trimmed}
+            {inline(trimmed, `b${i}`)}
           </p>
         );
       })}
@@ -57,7 +103,14 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
   const place = await getPlace(placeId, user?.id);
   if (!place) notFound();
 
-  const appearances = await getAppearances(placeId);
+  const [appearances, visit, related, links, incoming, routes] = await Promise.all([
+    getAppearances(placeId),
+    getVisitState(placeId, user?.id),
+    relatedPlaces(placeId),
+    resolveWikiLinks(place.body),
+    backlinks(place.name, placeId),
+    routesForPlace(placeId),
+  ]);
   const works = new Set(appearances.map((a) => a.work_slug));
 
   return (
@@ -71,49 +124,49 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
       </nav>
 
       <header className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="font-serif text-3xl font-bold tracking-wide">{place.name}</h1>
-            <p className="mt-1 text-sm text-ink-3">
-              {place.prefecture} {place.address}
-              <span className="ml-3 tabular-nums">
-                {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <LikeButton placeId={place.id} likes={place.likes} liked={place.liked_by_me} loggedIn={!!user} />
-            <Link
-              href={`/places/${place.id}/edit`}
-              className="rounded border border-rule-2 px-3.5 py-2 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
-            >
-              編集
-            </Link>
-            <Link
-              href={`/places/${place.id}/history`}
-              className="rounded px-2 py-2 text-sm text-ink-3 hover:text-shu"
-              title="この項目の編集履歴"
-            >
-              履歴
-            </Link>
-          </div>
+        <div>
+          <h1 className="font-serif text-2xl font-bold tracking-wide sm:text-3xl">{place.name}</h1>
+          <p className="mt-1 text-sm text-ink-3">
+            {place.prefecture} {place.address}
+          </p>
         </div>
 
-        {place.note && <p className="max-w-3xl font-serif text-lg leading-loose">{place.note}</p>}
+        {/* 巡礼の操作。スマホでは横並びのまま押しやすい大きさにする */}
+        <div className="flex flex-wrap items-center gap-2">
+          <VisitButton placeId={place.id} visited={visit.visited} total={visit.total} loggedIn={!!user} />
+          <LikeButton placeId={place.id} likes={place.likes} liked={place.liked_by_me} loggedIn={!!user} />
+          <a
+            href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-h-[44px] items-center rounded-full border border-rule-2 px-4 text-sm font-bold text-ink-2 hover:border-ai hover:text-ai"
+          >
+            経路を調べる ↗
+          </a>
+          <span className="ml-auto flex items-center gap-3 text-sm">
+            <Link href={`/places/${place.id}/edit`} className="font-bold text-ink-2 hover:text-shu">
+              編集
+            </Link>
+            <Link href={`/places/${place.id}/history`} className="text-ink-3 hover:text-shu">
+              履歴
+            </Link>
+          </span>
+        </div>
+
+        {place.note && <p className="max-w-3xl font-serif text-base leading-loose sm:text-lg">{place.note}</p>}
 
         <div className="flex flex-wrap gap-x-5 gap-y-1 border-y border-rule py-2.5 text-xs text-ink-3">
           <span>
-            登場する作品 <b className="font-bold text-ink-2">{works.size}</b>
+            作品 <b className="font-bold text-ink-2">{works.size}</b>
           </span>
           <span>
-            登録されたシーン <b className="font-bold text-ink-2">{appearances.length}</b>
+            シーン <b className="font-bold text-ink-2">{appearances.length}</b>
           </span>
           <span>
-            編集 <b className="font-bold text-ink-2">{place.revision_count}</b>回・
-            <b className="font-bold text-ink-2">{place.contributor_count}</b>人
+            編集 <b className="font-bold text-ink-2">{place.revision_count}</b>回
           </span>
           {place.updated_at && (
-            <span className="ml-auto">
+            <span className="sm:ml-auto">
               最終更新 {place.updated_at.slice(0, 10)}
               {place.editor_handle && (
                 <>
@@ -143,15 +196,14 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
             </figure>
           )}
 
-          {/* 記事本文 */}
           <section>
             <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">解説</h2>
             {place.body ? (
-              <Article body={place.body} />
+              <Article body={place.body} links={links} self={place.id} />
             ) : (
               <div className="rounded-md border border-dashed border-rule-2 px-4 py-6 text-center text-sm text-ink-3">
                 <p>この場所の解説はまだ書かれていません。</p>
-                <Link href={`/places/${place.id}/edit`} className="mt-2 inline-block font-bold text-shu hover:underline">
+                <Link href={`/places/${place.id}/edit`} className="mt-2 inline-block font-bold text-shu">
                   最初の一段落を書く →
                 </Link>
               </div>
@@ -167,7 +219,6 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
             </section>
           )}
 
-          {/* 登場するシーン */}
           <section>
             <div className="mb-3 flex items-center justify-between border-b border-rule pb-2">
               <h2 className="font-serif text-lg font-bold tracking-wide">
@@ -176,19 +227,17 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
               </h2>
               <Link
                 href={`/scenes/new?place=${place.id}`}
-                className="rounded bg-shu px-3 py-1.5 text-xs font-bold text-paper hover:opacity-90"
+                aria-label="この場所にシーンを追加"
+                className="shrink-0 rounded bg-shu px-3 py-2 text-xs font-bold text-paper"
               >
-                ＋ シーンを追加
+                ＋ シーン<span className="hidden sm:inline">を追加</span>
               </Link>
             </div>
 
             {appearances.length === 0 ? (
               <div className="rounded-md border border-dashed border-rule-2 px-4 py-6 text-center text-sm text-ink-3">
                 <p>この場所は、まだどのシーンとも結びついていません。</p>
-                <Link
-                  href={`/scenes/new?place=${place.id}`}
-                  className="mt-2 inline-block font-bold text-shu hover:underline"
-                >
+                <Link href={`/scenes/new?place=${place.id}`} className="mt-2 inline-block font-bold text-shu">
                   最初のシーンを登録する →
                 </Link>
               </div>
@@ -198,53 +247,38 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
                   <li key={a.passage_id}>
                     <Card className="overflow-hidden">
                       {a.image_path && (
-                        <figure>
-                          <a href={a.image_path} target="_blank" rel="noopener noreferrer" title="画像を開く">
-                            {/* 利用者が投稿した画像。サイズが不定なので next/image は使わない */}
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={a.image_path}
-                              alt={a.image_caption || `${a.work_title}のシーン`}
-                              loading="lazy"
-                              className="h-56 w-full object-cover"
-                            />
-                          </a>
-                          {(a.image_caption || a.image_credit) && (
-                            <figcaption className="border-b border-rule bg-paper-2/50 px-4 py-1.5 text-[11px] text-ink-3">
-                              {a.image_caption}
-                              {a.image_credit && <span className="ml-2">（{a.image_credit}）</span>}
-                            </figcaption>
-                          )}
-                        </figure>
+                        <a href={a.image_path} target="_blank" rel="noopener noreferrer">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={a.image_path}
+                            alt={a.image_caption || `${a.work_title}のシーン`}
+                            loading="lazy"
+                            className="h-48 w-full object-cover sm:h-56"
+                          />
+                        </a>
                       )}
-                      <div className="p-5">
+                      <div className="p-4 sm:p-5">
                         <div className="flex flex-wrap items-center gap-2 text-xs text-ink-3">
                           <MediumBadge medium={a.medium} />
                           <Link href={`/works/${a.work_slug}`} className="font-bold text-ink-2 hover:text-shu">
                             『{a.work_title}』
                           </Link>
-                          <span>{a.work_author}</span>
                           {a.chapter && <span>／{a.chapter}</span>}
                           {a.disputed && (
                             <Link
                               href={`/passages/${a.passage_id}`}
-                              className="rounded-full bg-[#e6efe7] px-2 py-0.5 text-[10px] font-bold text-[#4a6f51] hover:underline"
+                              className="rounded-full bg-[#e6efe7] px-2 py-0.5 text-[10px] font-bold text-[#4a6f51]"
                             >
-                              異説あり・確度 {Math.round(a.confidence * 100)}%
+                              異説あり {Math.round(a.confidence * 100)}%
                             </Link>
                           )}
-                          <Link
-                            href={`/passages/${a.passage_id}/edit`}
-                            className="ml-auto shrink-0 hover:text-shu"
-                            title="このシーンの記述を直す"
-                          >
+                          <Link href={`/passages/${a.passage_id}/edit`} className="ml-auto hover:text-shu">
                             編集
                           </Link>
                         </div>
                         <Link href={`/passages/${a.passage_id}`} className="group mt-2 block">
                           <PassageQuote kind={a.kind} quote={a.quote} className="group-hover:text-shu" />
                         </Link>
-                        {a.note && <p className="mt-2 text-sm leading-relaxed text-ink-3">{a.note}</p>}
                       </div>
                     </Card>
                   </li>
@@ -252,9 +286,60 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
               </ol>
             )}
           </section>
+
+          {/* 回遊のための出口 */}
+          {related.length > 0 && (
+            <section>
+              <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+                ここから辿れる項目
+              </h2>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {related.map((r) => (
+                  <Link
+                    key={r.id}
+                    href={`/places/${r.id}`}
+                    className="flex items-center gap-3 rounded-lg border border-rule bg-card p-3 active:bg-paper-2"
+                  >
+                    {r.photo_path ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={r.photo_path} alt="" loading="lazy" className="h-12 w-12 shrink-0 rounded object-cover" />
+                    ) : (
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-paper-2 font-serif text-ink-3">
+                        {r.name.slice(0, 1)}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold">{r.name}</span>
+                      <span className="block truncate text-[11px] text-ink-3">
+                        {r.reason}・{r.prefecture}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {incoming.length > 0 && (
+            <section>
+              <h2 className="mb-2 border-b border-rule pb-2 font-serif text-base font-bold tracking-wide">
+                この項目に言及している項目
+              </h2>
+              <p className="flex flex-wrap gap-2">
+                {incoming.map((b) => (
+                  <Link
+                    key={b.id}
+                    href={`/places/${b.id}`}
+                    className="rounded-full border border-rule-2 px-3 py-1.5 text-xs text-ink-2 hover:border-shu hover:text-shu"
+                  >
+                    {b.name}
+                  </Link>
+                ))}
+              </p>
+            </section>
+          )}
         </div>
 
-        {/* 地図と外部リンク */}
         <div className="space-y-4 lg:sticky lg:top-20">
           <Card className="overflow-hidden">
             <MapView
@@ -270,41 +355,52 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
                   likes: place.likes,
                 },
               ]}
-              height={300}
+              height={260}
               center={[place.lat, place.lng]}
               zoom={16}
               fit={false}
             />
             <div className="flex flex-wrap gap-3 border-t border-rule px-4 py-2.5 text-xs">
-              <a
-                href={`https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}#map=17/${place.lat}/${place.lng}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-ai hover:underline"
-              >
-                OpenStreetMap ↗
-              </a>
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-ai hover:underline"
-              >
-                経路を調べる ↗
-              </a>
+              <Link href={`/near?lat=${place.lat}&lng=${place.lng}`} className="font-bold text-shu">
+                この周辺の聖地を見る →
+              </Link>
             </div>
           </Card>
+
+          {routes.length > 0 && (
+            <Card className="p-4">
+              <h3 className="text-sm font-bold">この場所を含むコース</h3>
+              <ul className="mt-2 space-y-1.5">
+                {routes.map((r) => (
+                  <li key={r.slug}>
+                    <Link href={`/routes/${encodeURIComponent(r.slug)}`} className="text-sm text-ai hover:text-shu">
+                      {r.title}
+                      <span className="ml-1 text-[11px] text-ink-3">（{r.stop_count}か所）</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           <Card className="p-4 text-xs leading-relaxed text-ink-3">
             <p className="font-bold text-ink-2">この項目は誰でも編集できます</p>
             <p className="mt-1.5">
-              名前・座標・解説・行き方は、気づいた人が直せます。編集はすべて履歴に残り、
-              おかしな変更はいつでも差し戻せます。
+              本文に <code className="rounded bg-paper-2 px-1">[[別の場所の名前]]</code> と書くと、
+              その項目へのリンクになります。
             </p>
-            <Link href={`/places/${place.id}/edit`} className="mt-2 inline-block font-bold text-shu hover:underline">
+            <Link href={`/places/${place.id}/edit`} className="mt-2 inline-block font-bold text-shu">
               この項目を編集する →
             </Link>
           </Card>
+
+          <Link
+            href="/random"
+            prefetch={false}
+            className="flex min-h-[44px] items-center justify-center rounded-lg border border-dashed border-rule-2 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
+          >
+            ✦ おまかせでどこかへ
+          </Link>
         </div>
       </div>
     </div>

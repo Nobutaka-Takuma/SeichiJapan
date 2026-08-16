@@ -2,6 +2,7 @@ import { driver, tx, type Executor } from "../db";
 import { createSchema } from "../schema";
 import { applyDataPacks } from "./apply";
 import { initialPack } from "./packs/initial";
+import { routesPack } from "./packs/routes";
 import { shinGodzillaPack } from "./packs/shin-godzilla";
 import type { DataPack } from "./types";
 
@@ -15,7 +16,7 @@ export { DEMO_PASSWORD } from "./apply";
  * 起動時に、まだ流していないパックの分だけが入る。既存のDBを消す必要はなく、
  * 利用者が編集した記事も上書きされない。
  */
-export const PACKS: DataPack[] = [initialPack, shinGodzillaPack];
+export const PACKS: DataPack[] = [initialPack, shinGodzillaPack, routesPack];
 
 /** 一番新しいパック。ここまで入っていれば初期化は済んでいる。 */
 const LATEST = PACKS[PACKS.length - 1].id;

@@ -59,40 +59,43 @@ export default async function MapPage({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="border-b border-rule pb-4">
-        <h1 className="font-serif text-2xl font-bold tracking-wide">全国地図</h1>
-        <p className="mt-1 text-sm text-ink-3">
-          {primary.length}件の場所を表示しています。地図をクリックすれば、その場に直接シーンを書き込めます。
+    <div className="space-y-4 sm:space-y-6">
+      <div className="border-b border-rule pb-3 sm:pb-4">
+        <h1 className="font-serif text-xl font-bold tracking-wide sm:text-2xl">全国地図</h1>
+        <p className="mt-1 text-xs text-ink-3 sm:text-sm">
+          {primary.length}件の場所を表示しています。地図を押せば、その場に直接シーンを書き込めます。
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* 携帯では横スクロールの一列にして、地図をできるだけ上に出す */}
+      <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
         {FILTERS.map((f) => (
           <Link
             key={f.key}
             href={qs({ medium: f.key })}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+            className={`shrink-0 rounded-full px-3.5 py-2.5 text-xs font-bold sm:px-3 sm:py-1.5 ${
               medium === f.key ? "bg-ink text-paper" : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
             }`}
           >
             {f.label}
           </Link>
         ))}
-        <span className="mx-1 text-rule-2">｜</span>
-        <WorkFilterSelect
-          works={works.map((w) => ({ slug: w.slug, title: w.title, author: w.author }))}
-          value={workSlug}
-          medium={medium}
-        />
+        <span className="mx-1 shrink-0 text-rule-2">｜</span>
+        <div className="shrink-0">
+          <WorkFilterSelect
+            works={works.map((w) => ({ slug: w.slug, title: w.title, author: w.author }))}
+            value={workSlug}
+            medium={medium}
+          />
+        </div>
         {work && (
-          <Link href={qs({ work: undefined })} className="text-xs text-ink-3 hover:text-shu">
+          <Link href={qs({ work: undefined })} className="shrink-0 text-xs text-ink-3 hover:text-shu">
             絞り込みを解除
           </Link>
         )}
       </div>
 
-      <MapContribute pins={mapPins} loggedIn={!!user} height={620} />
+      <MapContribute pins={mapPins} loggedIn={!!user} height="clamp(360px, 58vh, 620px)" />
 
       <section>
         <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">都道府県別</h2>

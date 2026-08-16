@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Card, Empty, Stat } from "@/components/ui";
 import { getUserByHandle, getUserContributions } from "@/lib/queries";
+import { getVisitLog } from "@/lib/pilgrimage";
 
 export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
   const { handle } = await params;
@@ -16,6 +17,7 @@ export default async function UserPage({ params }: { params: Promise<{ handle: s
   if (!user) notFound();
 
   const { idents, comments, edits, votes, likes } = await getUserContributions(user.id);
+  const visits = await getVisitLog(user.id);
 
   return (
     <div className="space-y-8">
@@ -24,6 +26,7 @@ export default async function UserPage({ params }: { params: Promise<{ handle: s
         <p className="text-sm text-ink-3">@{user.handle}・{user.created_at.slice(0, 10)}から参加</p>
         {user.bio && <p className="mt-3 max-w-2xl leading-relaxed text-ink-2">{user.bio}</p>}
         <dl className="mt-5 flex flex-wrap gap-8">
+          <Stat label="訪ねた場所" value={visits.length} unit="か所" />
           <Stat label="登録したシーン" value={idents.length} unit="件" />
           <Stat label="記事の編集" value={edits.length} unit="回" />
           <Stat label="いいね" value={likes} unit="件" />
@@ -31,6 +34,38 @@ export default async function UserPage({ params }: { params: Promise<{ handle: s
           <Stat label="コメント" value={comments.length} unit="件" />
         </dl>
       </header>
+
+      <section>
+        <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+          訪ねた場所
+          <span className="ml-2 text-xs font-normal text-ink-3">{visits.length}か所</span>
+        </h2>
+        {visits.length === 0 ? (
+          <Empty>まだ訪問の記録はありません。行った場所で「行った」を押すと残ります。</Empty>
+        ) : (
+          <ol className="grid gap-2 sm:grid-cols-2">
+            {visits.map((v) => (
+              <li key={v.place_id}>
+                <Link
+                  href={`/places/${v.place_id}`}
+                  className="flex items-center gap-3 rounded-lg border border-rule bg-card p-2.5 active:bg-paper-2"
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-koke text-xs font-bold text-paper">
+                    ✓
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold">{v.name}</span>
+                    <span className="block text-[11px] text-ink-3">
+                      {v.prefecture}
+                      {v.visited_on && `・${String(v.visited_on).slice(0, 10)}`}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       <section>
         <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">記事の編集</h2>

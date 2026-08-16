@@ -38,7 +38,8 @@ export function LikeButton({
     });
   };
 
-  const pad = size === "sm" ? "px-2 py-1 text-xs" : "px-3.5 py-2 text-sm";
+  // 携帯では指で押せる大きさを確保し、画面が広いときだけ詰める
+  const pad = size === "sm" ? "px-3 py-2 text-xs sm:px-2 sm:py-1" : "px-3.5 py-2.5 text-sm sm:py-2";
 
   return (
     <div className="flex items-center gap-2">

@@ -646,3 +646,105 @@ export async function addWorkAction(_prev: FormState, fd: FormData): Promise<For
   // slug には日本語が入りうる。リダイレクトはヘッダで返るためASCIIに符号化する。
   redirect(`/works/${encodeURIComponent(slug)}`);
 }
+
+/* ---------- 訪問記録（チェックイン） ---------- */
+
+export async function toggleVisitAction(
+  placeId: number,
+  visitedOn?: string,
+): Promise<FormState & { visited?: boolean }> {
+  const user = await currentUser();
+  if (!user) return { error: "訪問を記録するにはログインが必要です" };
+
+  const existing = await one("SELECT 1 FROM visits WHERE place_id = $1 AND user_id = $2", [placeId, user.id]);
+
+  if (existing) {
+    await query("DELETE FROM visits WHERE place_id = $1 AND user_id = $2", [placeId, user.id]);
+  } else {
+    const day = visitedOn && /^\d{4}-\d{2}-\d{2}$/.test(visitedOn) ? visitedOn : null;
+    await query(
+      `INSERT INTO visits (place_id, user_id, visited_on) VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE))
+       ON CONFLICT DO NOTHING`,
+      [placeId, user.id, day],
+    );
+  }
+
+  revalidatePath(`/places/${placeId}`);
+  revalidatePath("/near");
+  revalidatePath("/routes");
+  return { ok: "記録しました", visited: !existing };
+}
+
+/* ---------- 巡礼コース ---------- */
+
+export async function saveRouteAction(_prev: FormState, fd: FormData): Promise<FormState & { slug?: string }> {
+  const user = await currentUser();
+  if (!user) return { error: "コースを作るにはログインが必要です" };
+  await ensureDatabaseReady();
+
+  const title = str(fd, "title");
+  if (!title) return { error: "コース名を入力してください" };
+
+  const stopIds = String(fd.get("stops") ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (stopIds.length < 2) return { error: "地点を2つ以上えらんでください" };
+
+  const editingSlug = str(fd, "slug");
+  let slug = editingSlug;
+
+  try {
+    slug = await tx(async (x) => {
+      let routeId: number;
+
+      if (editingSlug) {
+        const existing = await x.query<{ id: number; created_by: number | null }>(
+          "SELECT id, created_by FROM routes WHERE slug = $1",
+          [editingSlug],
+        );
+        if (!existing[0]) throw new Error("コースが見つかりません");
+        routeId = existing[0].id;
+        await x.query(
+          `UPDATE routes SET title = $1, description = $2, area = $3, work_id = $4, updated_at = now()
+            WHERE id = $5`,
+          [title, str(fd, "description"), str(fd, "area"), Number(fd.get("work_id")) || null, routeId],
+        );
+        await x.query("DELETE FROM route_stops WHERE route_id = $1", [routeId]);
+      } else {
+        const base = makeSlugBase(str(fd, "slug_hint"), title);
+        const s = await (async () => {
+          let candidate = base;
+          let n = 2;
+          while ((await x.query("SELECT 1 FROM routes WHERE slug = $1", [candidate])).length > 0) {
+            candidate = `${base}-${n++}`;
+          }
+          return candidate;
+        })();
+        const rows = await x.query<{ id: number; slug: string }>(
+          `INSERT INTO routes (slug, title, description, area, work_id, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, slug`,
+          [s, title, str(fd, "description"), str(fd, "area"), Number(fd.get("work_id")) || null, user.id],
+        );
+        routeId = rows[0].id;
+      }
+
+      for (const [i, placeId] of stopIds.entries()) {
+        await x.query("INSERT INTO route_stops (route_id, position, place_id) VALUES ($1, $2, $3)", [
+          routeId,
+          i,
+          placeId,
+        ]);
+      }
+
+      const row = await x.query<{ slug: string }>("SELECT slug FROM routes WHERE id = $1", [routeId]);
+      return row[0].slug;
+    });
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath("/routes");
+  revalidatePath(`/routes/${encodeURIComponent(slug)}`);
+  return { ok: "保存しました", slug };
+}

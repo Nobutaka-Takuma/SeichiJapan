@@ -52,6 +52,17 @@ export type SeedEdit = {
   access?: string;
 };
 
+/** 巡礼コース。地点は場所の名前で並べる。 */
+export type SeedRoute = {
+  slug: string;
+  title: string;
+  description?: string;
+  area?: string;
+  work?: string;
+  by: string;
+  stops: string[];
+};
+
 /**
  * まとめて投入するデータのひと固まり。
  *
@@ -66,4 +77,5 @@ export type DataPack = {
   places?: Record<string, SeedPlace>;
   works?: SeedWork[];
   edits?: SeedEdit[];
+  routes?: SeedRoute[];
 };

@@ -43,8 +43,14 @@ body {
   background: #e8d5cd;
 }
 
-a {
-  color: inherit;
+/*
+ * リンクの既定色を打ち消す。@layer base に置かないと、レイヤーの外の規則が
+ * utilities より強くなり、リンクに付けた text-shu などの色が全部効かなくなる。
+ */
+@layer base {
+  a {
+    color: inherit;
+  }
 }
 
 /* ---- Leaflet の見た目を紙に寄せる ---- */

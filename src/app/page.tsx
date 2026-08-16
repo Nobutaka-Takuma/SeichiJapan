@@ -64,15 +64,25 @@ export default async function Home() {
             を作ります。地図をクリックしてシーンを登録し、写真を添え、解説を直す。
             編集はすべて履歴に残ります。
           </p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            <Link href="/map" className="rounded bg-shu px-5 py-2.5 text-sm font-bold text-paper hover:opacity-90">
-              地図に書き込む
+          <div className="mt-7 flex flex-wrap gap-2">
+            <Link
+              href="/near"
+              className="flex min-h-[48px] items-center rounded bg-shu px-5 text-sm font-bold text-paper hover:opacity-90"
+            >
+              ◎ 近くの聖地を探す
             </Link>
             <Link
-              href="/places"
-              className="rounded border border-rule-2 px-5 py-2.5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
+              href="/routes"
+              className="flex min-h-[48px] items-center rounded border border-rule-2 px-5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
             >
-              聖地を見てまわる
+              ⇢ 巡礼コース
+            </Link>
+            <Link
+              href="/random"
+              prefetch={false}
+              className="flex min-h-[48px] items-center rounded border border-rule-2 px-5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
+            >
+              ✦ おまかせ
             </Link>
           </div>
           <dl className="mt-8 flex flex-wrap gap-x-8 gap-y-4 border-t border-rule pt-6">
@@ -104,23 +114,23 @@ export default async function Home() {
 
       {/* 仕組み */}
       <section>
-        <SectionTitle more={{ href: "/about", label: "詳しく" }}>三つの積み上げ方</SectionTitle>
+        <SectionTitle more={{ href: "/about", label: "詳しく" }}>この地図帳の使い方</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-3">
           {[
             {
               n: "一",
-              t: "地図から、シーンを置く",
-              d: "地図をクリックして「ここは○○の第3話のあの場面」と登録します。アニメならその場面の画像、小説なら本文の描写を添えて。",
+              t: "近くの聖地を見つける",
+              d: "現在地から近い順に、徒歩の目安つきで並びます。旅先で「いま何が近いか」がすぐ分かります。",
             },
             {
               n: "二",
-              t: "場所の項目を書き足す",
-              d: "誰でも編集できます。解説、行き方、注意すべきこと。間違いを直すのも、写真を1枚足すのも同じ貢献です。",
+              t: "回った記録を残す",
+              d: "訪ねた場所に「行った」を付けると、コースの踏破率が進みます。項目は誰でも書き足せます。",
             },
             {
               n: "三",
-              t: "いいねで残す",
-              d: "行ってよかった場所、よく書けている項目にいいねを。人気の場所はピンが大きくなり、一覧の上に出ます。",
+              t: "読みながら迷子になる",
+              d: "項目から項目へ辿れます。同じ作品の別の場所、同じ町の別の作品。おまかせを押せばどこかへ飛びます。",
             },
           ].map((s) => (
             <Card key={s.n} className="p-5">

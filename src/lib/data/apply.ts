@@ -191,6 +191,37 @@ async function applyPack(x: Executor, pack: DataPack) {
     }
   }
 
+  /* ---- 巡礼コース ---- */
+
+  for (const r of pack.routes ?? []) {
+    const exists = await x.query("SELECT 1 FROM routes WHERE slug = $1", [r.slug]);
+    if (exists.length > 0) continue;
+
+    const stopIds: number[] = [];
+    for (const name of r.stops) {
+      const id = await findPlace(name);
+      if (id !== null) stopIds.push(id);
+    }
+    if (stopIds.length < 2) continue; // 地点が揃わないコースは作らない
+
+    const workId = r.work
+      ? ((await x.query<{ id: number }>("SELECT id FROM works WHERE slug = $1", [r.work]))[0]?.id ?? null)
+      : null;
+
+    const rows = await x.query<{ id: number }>(
+      `INSERT INTO routes (slug, title, description, area, work_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [r.slug, r.title, r.description ?? "", r.area ?? "", workId, await ensureUser(r.by)],
+    );
+    for (const [i, placeId] of stopIds.entries()) {
+      await x.query("INSERT INTO route_stops (route_id, position, place_id) VALUES ($1, $2, $3)", [
+        rows[0].id,
+        i,
+        placeId,
+      ]);
+    }
+  }
+
   /* ---- 既存の記事への加筆 ---- */
 
   for (const e of (pack.edits ?? []) as SeedEdit[]) {

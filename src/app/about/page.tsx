@@ -98,6 +98,56 @@ export default function AboutPage() {
       </section>
 
       <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">訪ねるための機能</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            [
+              "近くの聖地",
+              "現在地から近い順に、徒歩の目安つきで並べます。旅先で「いま何が近いか」を調べるための画面です。地名を入れて調べることもできます。",
+            ],
+            [
+              "巡礼コース",
+              "回る順に地点を並べたもの。地点間の距離と所要の目安が出ます。地図アプリにその順で渡せるので、現地では案内に従うだけで回れます。",
+            ],
+            [
+              "訪問の記録",
+              "行った場所に印を付けられます。コースの踏破率が進み、自分のページに足跡が残ります。",
+            ],
+          ].map(([t, d]) => (
+            <Card key={t} className="p-5">
+              <h3 className="font-bold">{t}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-ink-2">{d}</p>
+            </Card>
+          ))}
+        </div>
+        <p className="leading-loose text-ink-2">
+          コースは、迎える側が「うちの町の回り方」を示すのにも使えます。
+          <Link href="/areas" className="font-bold text-shu hover:underline">
+            地域から探す
+          </Link>
+          では、市区町村ごとにその土地の聖地・作品・訪問記録の数を見渡せます。
+        </p>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">読んで迷子になる</h2>
+        <p className="leading-loose text-ink-2">
+          項目から項目へ辿れるようにしてあります。同じ作品に出てくる別の場所、同じ町の別の作品、
+          本文から張られたリンク、そしてこの項目に言及している項目。
+          行く予定がなくても、拾い読みしているうちに時間が溶けるのが、この手の事典の良さだと思っています。
+        </p>
+        <p className="leading-loose text-ink-2">
+          記事の本文に <code className="rounded bg-paper-2 px-1">[[別の場所の名前]]</code>{" "}
+          と書くと、その項目へのリンクになります。まだ無い項目への赤リンクも、
+          誰かが書けば埋まります。行き先を決めずに歩きたいときは{" "}
+          <Link href="/random" prefetch={false} className="font-bold text-shu hover:underline">
+            おまかせ
+          </Link>
+          をどうぞ。
+        </p>
+      </section>
+
+      <section className="space-y-4">
         <h2 className="font-serif text-xl font-bold tracking-wide">いいね</h2>
         <p className="leading-loose text-ink-2">
           行ってよかった場所、よく書けている項目にいいねを付けてください。
@@ -136,6 +186,10 @@ export default function AboutPage() {
           <li>
             聖地の多くは、人が暮らし、働いている場所です。住宅街の道、駅のホーム、営業中の店。
             長時間の滞在、車道での撮影、私有地への立ち入りはやめてください。
+          </li>
+          <li>
+            コースを作るときは、無理のない順番と所要時間を書いてください。
+            表示される距離は直線距離で、実際の道のりはもっと長くなります。
           </li>
           <li>個人の住宅の特定・公開は行わないでください。</li>
           <li>行き方の欄には、周囲に迷惑をかけずに訪れるための情報を書いてください。</li>

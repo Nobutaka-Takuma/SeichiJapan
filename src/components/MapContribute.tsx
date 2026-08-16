@@ -22,7 +22,7 @@ export function MapContribute({
 }: {
   pins: MapPin[];
   loggedIn: boolean;
-  height?: number;
+  height?: number | string;
 }) {
   const router = useRouter();
   const [picking, setPicking] = useState(false);
@@ -64,9 +64,9 @@ export function MapContribute({
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_380px] lg:items-start">
       <div className="overflow-hidden rounded-lg border border-rule bg-card">
-        <div className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-rule px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
           <AreaSearch
-            className="w-full sm:w-80"
+            className="min-w-0 flex-1 sm:w-80 sm:flex-none"
             onSelect={(h) =>
               setFocus({ lat: h.lat, lng: h.lng, zoom: h.zoom, bounds: h.bounds, nonce: Date.now() })
             }
@@ -86,8 +86,9 @@ export function MapContribute({
               ログインして地図に書き込む
             </Link>
           )}
-          <p className="text-xs text-ink-3">
-            {picking ? "地図の上で、シーンの場所をクリックしてください" : "地名を入れると、その周辺まで一息で移動します"}
+          {/* 携帯では、書き込み中の案内だけを残して地図の面積を稼ぐ */}
+          <p className={`text-xs text-ink-3 ${picking ? "w-full sm:w-auto" : "hidden sm:block"}`}>
+            {picking ? "地図の上で、シーンの場所を押してください" : "地名を入れると、その周辺まで一息で移動します"}
           </p>
         </div>
         <MapView
