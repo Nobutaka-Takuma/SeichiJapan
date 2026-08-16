@@ -4,11 +4,21 @@ import type { Metadata } from "next";
 import { AddCandidateForm } from "@/components/AddCandidateForm";
 import { CommentForm } from "@/components/CommentForm";
 import { MapView, type MapPin } from "@/components/MapView";
+import { PassageLinkList } from "@/components/PassageLinkList";
 import { VoteButtons } from "@/components/VoteButtons";
+import { WikiText } from "@/components/WikiText";
 import { Card, ConfidenceBar, ConsensusBadge, Empty, PassageQuote } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
 import { CONSENSUS_LABEL } from "@/lib/confidence";
+import { resolveWikiLinks } from "@/lib/pilgrimage";
 import { EVIDENCE_LABEL, getComments, getPassage } from "@/lib/queries";
+import {
+  moreFromWork,
+  passageNeighbors,
+  passagesAtSamePlaces,
+  passagesNearby,
+  type Neighbor,
+} from "@/lib/wander";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -29,6 +39,51 @@ const EVIDENCE_STYLE: Record<string, string> = {
   guess: "border-rule-2 text-ink-3",
 };
 
+/** 同じ作品を順に読み進めるための、前後の送り。 */
+function StepLink({ to, dir }: { to?: Neighbor; dir: "prev" | "next" }) {
+  const label = dir === "prev" ? "前の記述" : "次の記述";
+  if (!to) {
+    return (
+      <span className="flex-1 rounded-lg border border-dashed border-rule px-3 py-2.5 text-xs text-ink-3">
+        {dir === "prev" ? "これが最初の記述です" : "これが最後の記述です"}
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={`/passages/${to.id}`}
+      rel={dir === "prev" ? "prev" : "next"}
+      className={`min-w-0 flex-1 rounded-lg border border-rule bg-card px-3 py-2.5 transition hover:border-shu/40 active:bg-paper-2 ${
+        dir === "next" ? "text-right" : ""
+      }`}
+    >
+      <span className="block text-[11px] text-ink-3">
+        {dir === "prev" ? "← " : ""}
+        {label}
+        {to.chapter && `・${to.chapter}`}
+        {dir === "next" ? " →" : ""}
+      </span>
+      <span className="mt-0.5 line-clamp-1 text-sm text-ink">
+        {to.kind === "text" ? `「${to.quote}」` : to.quote}
+      </span>
+    </Link>
+  );
+}
+
+/** この範囲までは「この近く」と呼んでよい、とする距離。 */
+const NEAR_M = 5_000;
+
+/**
+ * まず近場（5km）で探し、そこに何も無ければ範囲を広げる。
+ * 一軒だけぽつんとある聖地でも行き止まりにしないための保険で、
+ * 広げたときは見出しと各カードの距離でそれと分かるようにしてある。
+ */
+async function nearbyWithFallback(lat: number, lng: number, exceptPlaceIds: number[]) {
+  const near = await passagesNearby(lat, lng, exceptPlaceIds, { radiusM: NEAR_M });
+  if (near.length > 0) return near;
+  return passagesNearby(lat, lng, exceptPlaceIds, { radiusM: 30_000 });
+}
+
 export default async function PassagePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const passageId = Number(id);
@@ -38,7 +93,33 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
   const passage = await getPassage(passageId, user?.id);
   if (!passage) notFound();
 
-  const comments = await getComments(passageId);
+  const placeIds = passage.candidates.map((c) => c.place_id);
+  const top = passage.candidates[0];
+
+  const [comments, neighbors, sameplaces, nearby, siblings, noteLinks] = await Promise.all([
+    getComments(passageId),
+    passageNeighbors(passage.id, passage.work.id),
+    passagesAtSamePlaces(passage.id, placeIds),
+    top ? nearbyWithFallback(top.lat, top.lng, placeIds) : Promise.resolve([]),
+    moreFromWork(passage.work.id, [passage.id]),
+    resolveWikiLinks(passage.note ?? ""),
+  ]);
+
+  // 同じものを二度出さない。前後の送りと近隣に出したものは、以降から外す。
+  const shown = new Set<number>([passage.id]);
+  if (neighbors.prev) shown.add(neighbors.prev.id);
+  if (neighbors.next) shown.add(neighbors.next.id);
+
+  const atSamePlace = sameplaces.filter((s) => !shown.has(s.passage_id));
+  for (const s of atSamePlace) shown.add(s.passage_id);
+
+  const around = nearby.filter((s) => !shown.has(s.passage_id));
+  for (const s of around) shown.add(s.passage_id);
+
+  const moreOfWork = siblings.filter((s) => !shown.has(s.passage_id)).slice(0, 4);
+
+  const aroundIsNear = around.every((a) => a.distance_m <= NEAR_M);
+
   const mapPins: MapPin[] = passage.candidates.map((c, i) => ({
     id: c.id,
     lat: c.lat,
@@ -105,7 +186,7 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
         )}
         {passage.note && (
           <p className="mt-4 max-w-3xl rounded-md bg-paper-2/60 px-4 py-3 text-sm leading-relaxed text-ink-2">
-            {passage.note}
+            <WikiText text={passage.note} links={noteLinks} />
           </p>
         )}
         <p className="mt-3 text-xs text-ink-3">
@@ -131,6 +212,22 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
           )}
         </p>
       </header>
+
+      {/* 作品のなかを順に読み進める */}
+      {neighbors.total > 1 && (
+        <nav aria-label="同じ作品の前後の記述" className="space-y-2">
+          <p className="text-xs text-ink-3">
+            <Link href={`/works/${passage.work.slug}`} className="font-bold text-ink-2 hover:text-shu">
+              『{passage.work.title}』
+            </Link>
+            の {neighbors.position} / {neighbors.total} 件目
+          </p>
+          <div className="flex gap-2">
+            <StepLink to={neighbors.prev} dir="prev" />
+            <StepLink to={neighbors.next} dir="next" />
+          </div>
+        </nav>
+      )}
 
       <div className="grid gap-8 lg:grid-cols-[1.3fr_1fr] lg:items-start">
         {/* 候補ランキング */}
@@ -216,6 +313,13 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
                         </a>
                       )}
                     </div>
+
+                    <Link
+                      href={`/places/${c.place_id}`}
+                      className="mt-3 inline-block text-xs font-bold text-shu hover:underline"
+                    >
+                      {c.place_name}の項目を読む →
+                    </Link>
                   </Card>
                 </li>
               ))}
@@ -281,6 +385,70 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
           </section>
         </div>
       </div>
+
+      {/* ここから先へ */}
+      {(atSamePlace.length > 0 || around.length > 0 || moreOfWork.length > 0) && (
+        <div className="space-y-8 border-t border-rule pt-8">
+          {atSamePlace.length > 0 && (
+            <section className="space-y-3">
+              <h2 className="border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+                同じ場所で描かれた、ほかの記述
+                <span className="ml-2 text-xs font-normal text-ink-3">{atSamePlace.length}件</span>
+              </h2>
+              <p className="text-xs text-ink-3">
+                ひとつの場所に、別々の物語が積み上がっています。
+              </p>
+              <PassageLinkList items={atSamePlace} />
+            </section>
+          )}
+
+          {around.length > 0 && (
+            <section className="space-y-3">
+              <h2 className="border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+                {aroundIsNear ? "この近くで描かれた場所" : "同じあたりで描かれた場所"}
+              </h2>
+              <p className="text-xs text-ink-3">
+                {top?.place_name}
+                {aroundIsNear
+                  ? "から歩いて行ける範囲で、ほかに描かれている場所です。"
+                  : "の近くには他になかったので、少し範囲を広げています。"}
+              </p>
+              <PassageLinkList items={around} />
+            </section>
+          )}
+
+          {moreOfWork.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-baseline justify-between border-b border-rule pb-2">
+                <h2 className="font-serif text-lg font-bold tracking-wide">
+                  『{passage.work.title}』のほかの記述
+                </h2>
+                <Link href={`/works/${passage.work.slug}`} className="text-xs font-bold text-shu hover:underline">
+                  すべて見る →
+                </Link>
+              </div>
+              <PassageLinkList items={moreOfWork} />
+            </section>
+          )}
+        </div>
+      )}
+
+      <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-6 text-sm">
+        <Link href={`/works/${passage.work.slug}`} className="font-bold text-shu hover:underline">
+          『{passage.work.title}』の一覧へ
+        </Link>
+        {top && (
+          <Link href={`/places/${top.place_id}`} className="text-ink-2 hover:text-shu">
+            {top.place_name}の項目
+          </Link>
+        )}
+        <Link href="/works" className="text-ink-2 hover:text-shu">
+          作品を探す
+        </Link>
+        <Link href="/random?kind=passage" prefetch={false} className="ml-auto text-ink-3 hover:text-shu">
+          記述をおまかせで →
+        </Link>
+      </nav>
     </div>
   );
 }

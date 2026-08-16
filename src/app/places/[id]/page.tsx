@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { MapView } from "@/components/MapView";
 import { VisitButton } from "@/components/VisitButton";
+import { WikiText } from "@/components/WikiText";
 import { Card, MediumBadge, PassageQuote } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
 import {
@@ -31,41 +32,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
  * 空行で段落、行頭の「■」を小見出し、[[名前]] を他の項目へのリンクとして扱う。
  */
 function Article({ body, links, self }: { body: string; links: Map<string, number>; self: number }) {
-  const inline = (text: string, keyBase: string) => {
-    const parts: React.ReactNode[] = [];
-    let last = 0;
-    for (const m of text.matchAll(/\[\[([^\]]{1,60})\]\]/g)) {
-      const name = m[1];
-      if (m.index! > last) parts.push(text.slice(last, m.index));
-      const id = links.get(name);
-      parts.push(
-        id === self ? (
-          // 自分自身へのリンクは張らない（辞典の作法にならう）
-          <b key={`${keyBase}-${m.index}`} className="font-bold text-ink">
-            {name}
-          </b>
-        ) : id ? (
-          <Link key={`${keyBase}-${m.index}`} href={`/places/${id}`} className="text-ai underline decoration-ai/40 underline-offset-2 hover:text-shu">
-            {name}
-          </Link>
-        ) : (
-          // まだ項目が無い名前。書けば埋まることが分かるようにしておく
-          <Link
-            key={`${keyBase}-${m.index}`}
-            href={`/places?q=${encodeURIComponent(name)}`}
-            className="text-ink-3 underline decoration-dotted underline-offset-2"
-            title="この項目はまだありません"
-          >
-            {name}
-          </Link>
-        ),
-      );
-      last = m.index! + m[0].length;
-    }
-    if (last < text.length) parts.push(text.slice(last));
-    return parts;
-  };
-
   const blocks = body.split(/\n{2,}/).filter((b) => b.trim());
   return (
     <div className="space-y-4">
@@ -79,14 +45,16 @@ function Article({ body, links, self }: { body: string; links: Map<string, numbe
                 {head.replace(/^■\s*/, "")}
               </h3>
               {rest.length > 0 && (
-                <p className="whitespace-pre-wrap leading-loose text-ink-2">{inline(rest.join("\n"), `b${i}`)}</p>
+                <p className="whitespace-pre-wrap leading-loose text-ink-2">
+                  <WikiText text={rest.join("\n")} links={links} self={self} />
+                </p>
               )}
             </div>
           );
         }
         return (
           <p key={i} className="whitespace-pre-wrap leading-loose text-ink-2">
-            {inline(trimmed, `b${i}`)}
+            <WikiText text={trimmed} links={links} self={self} />
           </p>
         );
       })}
@@ -113,6 +81,10 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
   ]);
   const works = new Set(appearances.map((a) => a.work_slug));
 
+  // 住所から市区町村を切り出して、地域の索引へ渡せるようにする
+  const muni = place.address.replace(/^.+?郡/, "").match(/^(.+?[市区町村])/)?.[1];
+  const areaKey = muni ? `${place.prefecture}${muni}` : null;
+
   return (
     <div className="space-y-8">
       <nav className="text-xs text-ink-3">
@@ -127,7 +99,15 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
         <div>
           <h1 className="font-serif text-2xl font-bold tracking-wide sm:text-3xl">{place.name}</h1>
           <p className="mt-1 text-sm text-ink-3">
-            {place.prefecture} {place.address}
+            {areaKey ? (
+              <Link href={`/areas/${encodeURIComponent(areaKey)}`} className="hover:text-shu">
+                {place.prefecture} {place.address}
+              </Link>
+            ) : (
+              <>
+                {place.prefecture} {place.address}
+              </>
+            )}
           </p>
         </div>
 

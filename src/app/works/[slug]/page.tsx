@@ -6,6 +6,7 @@ import { Card, ConfidenceBar, ConsensusBadge, Empty, MediumBadge, PassageQuote, 
 import { currentUser } from "@/lib/auth";
 import { decodeParam } from "@/lib/params";
 import { getPins, getWork, getWorkPassages } from "@/lib/queries";
+import { relatedWorks, workAreas } from "@/lib/wander";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const slug = decodeParam((await params).slug);
@@ -23,8 +24,12 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
   if (!work) notFound();
 
   const user = await currentUser();
-  const passages = await getWorkPassages(work.id, user?.id);
-  const pins = await getPins({ workId: work.id });
+  const [passages, pins, areas, related] = await Promise.all([
+    getWorkPassages(work.id, user?.id),
+    getPins({ workId: work.id }),
+    workAreas(work.id),
+    relatedWorks(work.id),
+  ]);
 
   const mapPins: MapPin[] = pins.map((p) => ({
     id: p.identification_id,
@@ -86,6 +91,22 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
           </span>
         </div>
       </Card>
+
+      {areas.length > 0 && (
+        <section className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-ink-3">舞台になっている地域</span>
+          {areas.map((a) => (
+            <Link
+              key={a.key}
+              href={`/areas/${encodeURIComponent(a.key)}`}
+              className="rounded-full border border-rule-2 px-3 py-1.5 text-xs text-ink-2 hover:border-shu hover:text-shu"
+            >
+              {a.municipality}
+              <span className="ml-1 text-ink-3">{a.place_count}</span>
+            </Link>
+          ))}
+        </section>
+      )}
 
       <section>
         <div className="mb-3 flex items-center justify-between border-b border-rule pb-2">
@@ -180,6 +201,54 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
           </ol>
         )}
       </section>
+
+      {related.length > 0 && (
+        <section>
+          <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+            この作品から辿れる作品
+          </h2>
+          <p className="mb-3 text-xs text-ink-3">
+            同じ場所を舞台にしている作品です。ひとつの町が、作品によって違う顔で描かれています。
+          </p>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {related.map((w) => (
+              <li key={w.slug}>
+                <Link
+                  href={`/works/${encodeURIComponent(w.slug)}`}
+                  className="flex h-full flex-col gap-1 rounded-lg border border-rule bg-card p-3 transition hover:border-shu/40 active:bg-paper-2"
+                >
+                  <span className="flex flex-wrap items-baseline gap-2">
+                    <MediumBadge medium={w.medium} />
+                    <span className="font-serif font-bold">『{w.title}』</span>
+                    <span className="text-xs text-ink-3">{w.author}</span>
+                    <span className="ml-auto shrink-0 rounded bg-paper-2 px-1.5 py-px text-[11px] text-ink-3">
+                      {w.reason}
+                    </span>
+                  </span>
+                  {w.shared_places && (
+                    <span className="line-clamp-1 text-xs text-ink-3">重なる場所：{w.shared_places}</span>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <nav className="flex flex-wrap gap-3 border-t border-rule pt-6 text-sm">
+        <Link href="/works" className="font-bold text-shu hover:underline">
+          作品の一覧へ
+        </Link>
+        <Link href="/areas" className="text-ink-2 hover:text-shu">
+          地域から探す
+        </Link>
+        <Link href="/routes" className="text-ink-2 hover:text-shu">
+          巡礼コース
+        </Link>
+        <Link href="/random" prefetch={false} className="ml-auto text-ink-3 hover:text-shu">
+          おまかせ表示 →
+        </Link>
+      </nav>
     </div>
   );
 }

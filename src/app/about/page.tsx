@@ -132,18 +132,25 @@ export default function AboutPage() {
       <section className="space-y-4">
         <h2 className="font-serif text-xl font-bold tracking-wide">読んで迷子になる</h2>
         <p className="leading-loose text-ink-2">
-          項目から項目へ辿れるようにしてあります。同じ作品に出てくる別の場所、同じ町の別の作品、
-          本文から張られたリンク、そしてこの項目に言及している項目。
+          どのページも行き止まりにならないようにしてあります。場所からは、同じ作品に出てくる別の場所、
+          同じ町の別の作品、本文から張られたリンク、この項目に言及している項目へ。
+          シーンからは、同じ作品の前後のシーン、同じ場所で描かれた別の作品のシーン、
+          その場所の近くで描かれた場所へ。作品からは、舞台が重なる別の作品と、その舞台の地域へ。
           行く予定がなくても、拾い読みしているうちに時間が溶けるのが、この手の事典の良さだと思っています。
         </p>
         <p className="leading-loose text-ink-2">
-          記事の本文に <code className="rounded bg-paper-2 px-1">[[別の場所の名前]]</code>{" "}
+          記事の本文にも、シーンの注記にも、
+          <code className="rounded bg-paper-2 px-1">[[別の場所の名前]]</code>{" "}
           と書くと、その項目へのリンクになります。まだ無い項目への赤リンクも、
           誰かが書けば埋まります。行き先を決めずに歩きたいときは{" "}
           <Link href="/random" prefetch={false} className="font-bold text-shu hover:underline">
             おまかせ
           </Link>
-          をどうぞ。
+          （
+          <Link href="/random?kind=passage" prefetch={false} className="font-bold text-shu hover:underline">
+            シーンのおまかせ
+          </Link>
+          ）をどうぞ。
         </p>
       </section>
 

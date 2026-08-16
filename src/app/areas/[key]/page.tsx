@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { MapView, type MapPin } from "@/components/MapView";
-import { Card } from "@/components/ui";
+import { Card, MediumBadge } from "@/components/ui";
 import { decodeParam } from "@/lib/params";
 import { getArea, listAreas } from "@/lib/pilgrimage";
+import { siblingAreas, worksInArea } from "@/lib/wander";
 
 /** 「東京都新宿区」を都道府県と市区町村に割る。 */
 function split(key: string): { prefecture: string; municipality: string } | null {
@@ -30,7 +31,11 @@ export default async function AreaPage({ params }: { params: Promise<{ key: stri
   const area = await getArea(parts.prefecture, parts.municipality);
   if (!area) notFound();
 
-  const summaries = await listAreas();
+  const [summaries, works, siblings] = await Promise.all([
+    listAreas(),
+    worksInArea(parts.prefecture, parts.municipality),
+    siblingAreas(parts.prefecture, parts.municipality),
+  ]);
   const summary = summaries.find((s) => s.key === key);
 
   const pins: MapPin[] = area.places.map((p) => ({
@@ -110,7 +115,7 @@ export default async function AreaPage({ params }: { params: Promise<{ key: stri
               <span className="min-w-0 flex-1 py-2.5 pr-3">
                 <span className="block truncate font-bold">{p.name}</span>
                 {p.works && <span className="mt-0.5 block truncate text-xs text-ink-2">{p.works}</span>}
-                {p.note && <span className="mt-1 line-clamp-2 block text-[11px] text-ink-3">{p.note}</span>}
+                {p.note && <span className="mt-1 line-clamp-2 text-[11px] text-ink-3">{p.note}</span>}
                 <span className="mt-1 flex gap-2 text-[11px] text-ink-3">
                   {p.likes > 0 && <span className="text-shu">♥{p.likes}</span>}
                   <span>シーン{p.scene_count}</span>
@@ -120,6 +125,48 @@ export default async function AreaPage({ params }: { params: Promise<{ key: stri
           </li>
         ))}
       </ol>
+
+      {works.length > 0 && (
+        <section>
+          <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+            この地域を舞台にしている作品
+          </h2>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {works.map((w) => (
+              <li key={w.slug}>
+                <Link
+                  href={`/works/${encodeURIComponent(w.slug)}`}
+                  className="flex items-center gap-2 rounded-lg border border-rule bg-card px-3 py-2.5 active:bg-paper-2"
+                >
+                  <MediumBadge medium={w.medium} />
+                  <span className="min-w-0 flex-1 truncate font-bold">『{w.title}』</span>
+                  <span className="shrink-0 text-[11px] text-ink-3">{w.place_count}か所</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {siblings.length > 0 && (
+        <section>
+          <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">
+            {parts.prefecture}のほかの地域
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {siblings.map((a) => (
+              <Link
+                key={a.key}
+                href={`/areas/${encodeURIComponent(a.key)}`}
+                className="rounded-full border border-rule-2 px-3 py-1.5 text-xs text-ink-2 hover:border-shu hover:text-shu"
+              >
+                {a.municipality}
+                <span className="ml-1 text-ink-3">{a.place_count}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
