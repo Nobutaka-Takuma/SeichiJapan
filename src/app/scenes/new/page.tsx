@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { SceneForm } from "@/components/SceneForm";
+import { SigningAs } from "@/components/SigningAs";
 import { Card } from "@/components/ui";
-import { currentUser } from "@/lib/auth";
 import { getPlace, getWork } from "@/lib/queries";
 import { decodeParam } from "@/lib/params";
 
@@ -15,14 +14,6 @@ export default async function NewScenePage({
   searchParams: Promise<{ place?: string; work?: string }>;
 }) {
   const { place: placeParam, work: workParam } = await searchParams;
-
-  const user = await currentUser();
-  if (!user) {
-    const back = new URLSearchParams();
-    if (placeParam) back.set("place", placeParam);
-    if (workParam) back.set("work", workParam);
-    redirect(`/login?next=${encodeURIComponent(`/scenes/new${back.toString() ? `?${back}` : ""}`)}`);
-  }
 
   const place = placeParam ? await getPlace(Number(placeParam)) : undefined;
   const work = workParam ? await getWork(decodeParam(workParam)) : undefined;
@@ -80,6 +71,10 @@ export default async function NewScenePage({
           }
         />
       </Card>
+
+      <SigningAs
+        next={`/scenes/new${place ? `?place=${place.id}` : work ? `?work=${encodeURIComponent(work.slug)}` : ""}`}
+      />
 
       {place && (
         <p className="text-center text-xs text-ink-3">

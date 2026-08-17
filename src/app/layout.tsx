@@ -59,14 +59,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </nav>
 
             <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
+              {/* 書き込みにログインは要らないので、この誘いは誰にでも同じように出す */}
+              <Link
+                href="/scenes/new"
+                className="rounded bg-shu px-3 py-2 text-xs font-bold text-paper hover:opacity-90"
+              >
+                ＋ 書き込む
+              </Link>
               {user ? (
                 <>
-                  <Link
-                    href="/scenes/new"
-                    className="rounded bg-shu px-3 py-2 text-xs font-bold text-paper hover:opacity-90"
-                  >
-                    ＋ 書き込む
-                  </Link>
                   {user.is_admin && (
                     <Link href="/admin" className="text-xs font-bold text-ai hover:text-shu" title="管理">
                       管理
@@ -83,13 +84,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 </>
               ) : (
                 <>
-                  <Link href="/login" className="text-ink-2 hover:text-shu">
+                  <Link href="/login" className="hidden text-ink-2 hover:text-shu sm:inline">
                     ログイン
                   </Link>
-                  <Link
-                    href="/register"
-                    className="rounded bg-shu px-3 py-2 text-xs font-bold text-paper hover:opacity-90"
-                  >
+                  <Link href="/register" className="text-xs text-ink-3 hover:text-shu">
                     参加
                   </Link>
                 </>

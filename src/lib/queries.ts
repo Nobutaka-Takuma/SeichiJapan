@@ -708,12 +708,14 @@ export type UserProfile = {
   display_name: string;
   bio: string;
   created_at: string;
+  is_anon: boolean;
 };
 
 export async function getUserByHandle(handle: string): Promise<UserProfile | undefined> {
   await ready();
   return one<UserProfile>(
-    "SELECT id, handle, display_name, bio, created_at FROM users WHERE handle = $1",
+    `SELECT id, handle, display_name, bio, created_at, COALESCE(is_anon, false) AS is_anon
+       FROM users WHERE handle = $1`,
     [handle],
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toggleVisitAction } from "@/app/actions";
+import { LoginNudge } from "./LoginNudge";
 
 /**
  * 「行った」の記録。
@@ -23,10 +24,11 @@ export function VisitButton({
   const [pending, start] = useTransition();
   const [state, setState] = useState({ visited, total });
   const [error, setError] = useState<string | null>(null);
+  const [nudge, setNudge] = useState(false);
 
   const toggle = () => {
     if (!loggedIn) {
-      setError("ログインすると訪問を記録できます");
+      setNudge(true);
       return;
     }
     setError(null);
@@ -58,6 +60,7 @@ export function VisitButton({
         {state.visited ? "訪問済み" : "行った"}
         {state.total > 0 && <span className="tabular-nums opacity-80">{state.total}</span>}
       </button>
+      {nudge && <LoginNudge message="旅の記録はあなたのものです。" />}
       {error && <span className="text-[11px] text-shu">{error}</span>}
     </div>
   );

@@ -22,8 +22,22 @@ export default async function UserPage({ params }: { params: Promise<{ handle: s
   return (
     <div className="space-y-8">
       <header className="border-b border-rule pb-5">
-        <h1 className="font-serif text-2xl font-bold tracking-wide">{user.display_name}</h1>
+        <h1 className="font-serif text-2xl font-bold tracking-wide">
+          {user.display_name}
+          {user.is_anon && (
+            <span className="ml-2 align-middle rounded border border-rule-2 px-1.5 py-0.5 text-[11px] font-normal text-ink-3">
+              名乗らずに書いている人
+            </span>
+          )}
+        </h1>
         <p className="text-sm text-ink-3">@{user.handle}・{user.created_at.slice(0, 10)}から参加</p>
+        {user.is_anon && (
+          <p className="mt-2 max-w-2xl text-xs leading-relaxed text-ink-3">
+            ログインせずに書かれた分です。この名前はブラウザごとに決まるもので、
+            個人を特定するものではありません。書いた本人がアカウントを作れば、
+            ここの記録はそのまま引き継がれます。
+          </p>
+        )}
         {user.bio && <p className="mt-3 max-w-2xl leading-relaxed text-ink-2">{user.bio}</p>}
         <dl className="mt-5 flex flex-wrap gap-8">
           <Stat label="訪ねた場所" value={visits.length} unit="か所" />

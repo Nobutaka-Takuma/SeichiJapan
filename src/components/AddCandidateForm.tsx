@@ -1,13 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
 import { addIdentificationAction, type FormState } from "@/app/actions";
 import { PlacePicker } from "./MapView";
 
 type PlaceHit = { id: number; name: string; prefecture: string; address: string; lat: number; lng: number };
 
-export function AddCandidateForm({ passageId, loggedIn }: { passageId: number; loggedIn: boolean }) {
+export function AddCandidateForm({ passageId }: { passageId: number }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [query, setQuery] = useState("");
@@ -41,18 +40,6 @@ export function AddCandidateForm({ passageId, loggedIn }: { passageId: number; l
       setQuery("");
     }
   }, [state.ok]);
-
-  if (!loggedIn) {
-    return (
-      <p className="rounded-md border border-dashed border-rule-2 px-4 py-4 text-center text-xs text-ink-3">
-        異説を出すには{" "}
-        <Link href={`/login?next=/passages/${passageId}`} className="font-bold text-shu hover:underline">
-          ログイン
-        </Link>{" "}
-        してください。
-      </p>
-    );
-  }
 
   if (!open) {
     return (

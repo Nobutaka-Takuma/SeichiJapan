@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { one, query, tx, type Executor } from "@/lib/db";
 import { ensureDatabaseReady } from "@/lib/data";
-import { currentUser, login, logout, register, requireAdmin } from "@/lib/auth";
+import { contributor, currentUser, login, logout, register, requireAdmin } from "@/lib/auth";
 import { UploadError, deleteImage, saveImage } from "@/lib/uploads";
 
 export type FormState = { error?: string; ok?: string };
@@ -61,7 +61,7 @@ export async function logoutAction() {
 
 export async function toggleLikeAction(placeId: number): Promise<FormState & { liked?: boolean }> {
   const user = await currentUser();
-  if (!user) return { error: "いいねするにはログインが必要です" };
+  if (!user) return { error: "いいねはアカウントに紐づきます。ログインしてください" };
 
   const existing = await one("SELECT 1 FROM place_likes WHERE place_id = $1 AND user_id = $2", [
     placeId,
@@ -107,9 +107,6 @@ const snapshotPassage = (x: Executor, passageId: number, editorId: number | null
 /* ---------- 場所の記事の共同編集 ---------- */
 
 export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "編集するにはログインが必要です" };
-
   const placeId = Number(fd.get("place_id"));
   const current = await one<{ id: number; photo_path: string }>(
     "SELECT id, photo_path FROM places WHERE id = $1",
@@ -127,6 +124,10 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
   }
 
   try {
+    // 書き手を決めるのは、入力が通ってから。
+    // ここで初めて匿名の行ができる（空振りで行だけ増えるのを避ける）
+    const user = await contributor();
+
     let photo = current.photo_path;
     if (str(fd, "remove_photo") === "1") photo = "";
     const uploaded = await saveImage(fd.get("photo"));
@@ -168,9 +169,6 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
 
 /** 過去の版の内容で上書きする。差し戻したこと自体も履歴に残る。 */
 export async function revertPlaceAction(revisionId: number): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "差し戻すにはログインが必要です" };
-
   const rev = await one<{
     id: number;
     place_id: number;
@@ -187,6 +185,7 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
   if (!rev) return { error: "指定された版が見つかりません" };
 
   try {
+    const user = await contributor();
     await tx(async (x) => {
       await x.query(
         `UPDATE places
@@ -222,9 +221,6 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
 /* ---------- シーンの共同編集 ---------- */
 
 export async function editPassageAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "編集するにはログインが必要です" };
-
   const passageId = Number(fd.get("passage_id"));
   const current = await one<{ id: number; image_path: string }>(
     "SELECT id, image_path FROM passages WHERE id = $1",
@@ -236,6 +232,8 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
   if (quote.length < 5) return { error: "本文または場面の記述を5文字以上で書いてください" };
 
   try {
+    const user = await contributor();
+
     let image = current.image_path;
     if (str(fd, "remove_image") === "1") image = "";
     const uploaded = await saveImage(fd.get("image"));
@@ -273,9 +271,6 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
 }
 
 export async function revertPassageAction(revisionId: number): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "差し戻すにはログインが必要です" };
-
   const rev = await one<{
     id: number;
     passage_id: number;
@@ -290,6 +285,7 @@ export async function revertPassageAction(revisionId: number): Promise<FormState
   if (!rev) return { error: "指定された版が見つかりません" };
 
   try {
+    const user = await contributor();
     await tx(async (x) => {
       await x.query(
         `UPDATE passages
@@ -380,13 +376,12 @@ async function resolveWork(
  * 場所（新規なら作成）・シーン・場所との結びつけをまとめて作る。
  */
 export async function addSceneAction(_prev: FormState, fd: FormData): Promise<FormState & { placeId?: number }> {
-  const user = await currentUser();
-  if (!user) return { error: "投稿するにはログインが必要です" };
   await ensureDatabaseReady();
 
   const quote = str(fd, "quote");
   if (quote.length < 5) return { error: "シーンの説明を5文字以上で書いてください" };
 
+  const user = await contributor();
   let image: string | null = null;
   try {
     image = await saveImage(fd.get("image"));
@@ -484,7 +479,7 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
 
 export async function voteAction(identificationId: number, value: 1 | -1): Promise<FormState> {
   const user = await currentUser();
-  if (!user) return { error: "投票するにはログインが必要です" };
+  if (!user) return { error: "投票は1人1票なので、ログインしてください" };
 
   const row = await one<{ value: number }>(
     "SELECT value FROM votes WHERE identification_id = $1 AND user_id = $2",
@@ -522,15 +517,13 @@ export async function voteAction(identificationId: number, value: 1 | -1): Promi
 /* ---------- 比定案の投稿（異説） ---------- */
 
 export async function addIdentificationAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "投稿するにはログインが必要です" };
-
   const passageId = Number(fd.get("passage_id"));
   if (!Number.isInteger(passageId)) return { error: "記述が指定されていません" };
 
   const rationale = str(fd, "rationale");
   if (rationale.length < 10) return { error: "根拠は10文字以上で書いてください（なぜそこだと考えたか）" };
 
+  const user = await contributor();
   let placeId = Number(fd.get("place_id")) || 0;
   let problem: string | null = null;
 
@@ -589,14 +582,12 @@ export async function addIdentificationAction(_prev: FormState, fd: FormData): P
 /* ---------- コメント ---------- */
 
 export async function addCommentAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "コメントするにはログインが必要です" };
-
   const passageId = Number(fd.get("passage_id"));
   const body = str(fd, "body");
   if (!body) return { error: "本文を入力してください" };
   if (body.length > 4000) return { error: "コメントが長すぎます" };
 
+  const user = await contributor();
   const identId = Number(fd.get("identification_id")) || null;
   try {
     await query(
@@ -613,8 +604,6 @@ export async function addCommentAction(_prev: FormState, fd: FormData): Promise<
 /* ---------- 作品の追加 ---------- */
 
 export async function addWorkAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await currentUser();
-  if (!user) return { error: "投稿するにはログインが必要です" };
   await ensureDatabaseReady();
 
   const title = str(fd, "title");
@@ -628,6 +617,7 @@ export async function addWorkAction(_prev: FormState, fd: FormData): Promise<For
     return { error: "発表年が正しくありません" };
   }
 
+  const user = await contributor();
   let slug: string;
   try {
     slug = await tx(async (x) => {
@@ -654,7 +644,7 @@ export async function toggleVisitAction(
   visitedOn?: string,
 ): Promise<FormState & { visited?: boolean }> {
   const user = await currentUser();
-  if (!user) return { error: "訪問を記録するにはログインが必要です" };
+  if (!user) return { error: "旅の記録はあなたのものです。ログインすると残せます" };
 
   const existing = await one("SELECT 1 FROM visits WHERE place_id = $1 AND user_id = $2", [placeId, user.id]);
 
@@ -678,8 +668,6 @@ export async function toggleVisitAction(
 /* ---------- 巡礼コース ---------- */
 
 export async function saveRouteAction(_prev: FormState, fd: FormData): Promise<FormState & { slug?: string }> {
-  const user = await currentUser();
-  if (!user) return { error: "コースを作るにはログインが必要です" };
   await ensureDatabaseReady();
 
   const title = str(fd, "title");
@@ -691,6 +679,7 @@ export async function saveRouteAction(_prev: FormState, fd: FormData): Promise<F
     .filter((n) => Number.isInteger(n) && n > 0);
   if (stopIds.length < 2) return { error: "地点を2つ以上えらんでください" };
 
+  const user = await contributor();
   const editingSlug = str(fd, "slug");
   let slug = editingSlug;
 

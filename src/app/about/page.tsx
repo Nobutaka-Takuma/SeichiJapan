@@ -41,7 +41,7 @@ export default function AboutPage() {
         <h2 className="font-serif text-xl font-bold tracking-wide">誰でも編集できます</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           {[
-            ["編集に許可はいりません", "ログインしていれば、どの項目でもすぐ直せます。誤字ひとつ、写真1枚でも十分な貢献です。"],
+            ["ログインは要りません", "思いついたときに、そのまま直せます。誤字ひとつ、写真1枚でも十分な貢献です。名乗りたくなったら、あとからアカウントを作れます。"],
             ["すべて履歴に残ります", "いつ誰が何を変えたかが版として残り、前の版との差分が行単位で見られます。"],
             ["いつでも戻せます", "おかしな変更は、履歴から一手で差し戻せます。差し戻したこと自体も履歴に残ります。"],
           ].map(([t, d]) => (
@@ -51,6 +51,36 @@ export default function AboutPage() {
             </Card>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">名乗らずに書けます</h2>
+        <p className="leading-loose text-ink-2">
+          編集も、シーンの登録も、議論への書き込みも、
+          <strong className="font-bold text-ink">ログインなしでできます</strong>。
+          思いついたときに直せることのほうが、名前が揃っていることより大事だと考えています。
+        </p>
+        <p className="leading-loose text-ink-2">
+          名乗らずに書いた分は「匿名 a3f2」のような名前で記録されます。
+          この名前はお使いのブラウザごとに決まるもので、個人を特定するものではありません。
+          同じブラウザから書けば同じ名前になるので、その人の書いたものをまとめて見ることはできます。
+        </p>
+        <p className="leading-loose text-ink-2">
+          あとから<Link href="/register" className="font-bold text-shu hover:underline">アカウントを作る</Link>と、
+          <strong className="font-bold text-ink">それまでに書いた分もそのまま引き継がれます</strong>。
+          先に書いて、気に入ったら名乗る、で構いません。
+        </p>
+        <Card className="p-6">
+          <p className="text-sm font-bold text-ink-2">ログインが要るのは、この3つだけです</p>
+          <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-ink-2">
+            <li>
+              <b className="text-ink">旅の記録</b>（行った場所・コースの踏破）
+              — あなたのものとして残るものだからです
+            </li>
+            <li><b className="text-ink">いいね</b> — 1人1回で数えるためです</li>
+            <li><b className="text-ink">投票</b> — 1人1票で確度を出すためです</li>
+          </ul>
+        </Card>
       </section>
 
       <section className="space-y-4">

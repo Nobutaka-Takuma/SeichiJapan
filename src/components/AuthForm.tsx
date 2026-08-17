@@ -30,8 +30,11 @@ export function AuthForm({ mode, next }: { mode: "login" | "register"; next?: st
 
       {mode === "register" && (
         <label className="block">
-          <span className="text-xs font-bold text-ink-2">表示名</span>
+          <span className="text-xs font-bold text-ink-2">
+            表示名 <span className="font-normal text-ink-3">（任意・あとで変えられます）</span>
+          </span>
           <input name="display_name" placeholder="古地図倶楽部" className={`${field} mt-1`} />
+          <span className="mt-1 block text-[11px] text-ink-3">空のままならユーザーIDを表示名にします</span>
         </label>
       )}
 

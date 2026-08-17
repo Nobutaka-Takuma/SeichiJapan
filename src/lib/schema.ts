@@ -193,6 +193,13 @@ CREATE TABLE IF NOT EXISTS data_packs (
 -- 管理者の権限。既存のDBにも後から足せるように ALTER で書く。
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
 
+-- 名乗らずに書いた人。
+--
+-- 匿名でも users の行をひとつ持たせる。こうしておくと、履歴・差分・差し戻し・
+-- 貢献の一覧といった仕組みが、ログインした人とまったく同じ経路で動く。
+-- password_hash は空にしてあり、この行でログインすることはできない。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_anon BOOLEAN NOT NULL DEFAULT false;
+
 -- 削除の記録。
 --
 -- 削除は取り消せない（実体を消す）。そのかわり、誰が何をなぜ消したかと、

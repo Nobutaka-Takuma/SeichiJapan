@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { PlaceEditForm } from "@/components/PlaceEditForm";
+import { SigningAs } from "@/components/SigningAs";
 import { Card } from "@/components/ui";
-import { currentUser } from "@/lib/auth";
 import { getPlace } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -19,9 +19,6 @@ export default async function EditPlacePage({ params }: { params: Promise<{ id: 
 
   const place = await getPlace(placeId);
   if (!place) notFound();
-
-  const user = await currentUser();
-  if (!user) redirect(`/login?next=/places/${placeId}/edit`);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -48,6 +45,8 @@ export default async function EditPlacePage({ params }: { params: Promise<{ id: 
       <Card className="p-6">
         <PlaceEditForm place={place} />
       </Card>
+
+      <SigningAs next={`/places/${place.id}/edit`} />
 
       <p className="text-center text-xs text-ink-3">
         <Link href={`/places/${place.id}/history`} className="hover:text-shu">

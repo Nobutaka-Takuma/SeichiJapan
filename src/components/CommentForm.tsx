@@ -1,17 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState, useEffect, useRef } from "react";
 import { addCommentAction, type FormState } from "@/app/actions";
 
 export function CommentForm({
   passageId,
   candidates,
-  loggedIn,
 }: {
   passageId: number;
   candidates: { id: number; place_name: string }[];
-  loggedIn: boolean;
 }) {
   const [state, action, pending] = useActionState<FormState, FormData>(addCommentAction, {});
   const formRef = useRef<HTMLFormElement>(null);
@@ -19,18 +16,6 @@ export function CommentForm({
   useEffect(() => {
     if (state.ok) formRef.current?.reset();
   }, [state.ok]);
-
-  if (!loggedIn) {
-    return (
-      <p className="rounded-md border border-dashed border-rule-2 px-4 py-5 text-center text-sm text-ink-3">
-        議論に加わるには{" "}
-        <Link href={`/login?next=/passages/${passageId}`} className="font-bold text-shu hover:underline">
-          ログイン
-        </Link>{" "}
-        してください。
-      </p>
-    );
-  }
 
   return (
     <form ref={formRef} action={action} className="space-y-2">

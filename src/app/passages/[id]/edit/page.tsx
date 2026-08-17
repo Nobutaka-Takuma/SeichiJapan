@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { PassageEditForm } from "@/components/PassageEditForm";
+import { SigningAs } from "@/components/SigningAs";
 import { Card } from "@/components/ui";
-import { currentUser } from "@/lib/auth";
 import { getPassage } from "@/lib/queries";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -19,9 +19,6 @@ export default async function EditPassagePage({ params }: { params: Promise<{ id
 
   const passage = await getPassage(passageId);
   if (!passage) notFound();
-
-  const user = await currentUser();
-  if (!user) redirect(`/login?next=/passages/${passageId}/edit`);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -58,6 +55,8 @@ export default async function EditPassagePage({ params }: { params: Promise<{ id
           }}
         />
       </Card>
+
+      <SigningAs next={`/passages/${passage.id}/edit`} />
 
       <p className="text-center text-xs text-ink-3">
         <Link href={`/passages/${passage.id}/history`} className="hover:text-shu">

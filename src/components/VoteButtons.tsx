@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { voteAction } from "@/app/actions";
+import { LoginNudge } from "./LoginNudge";
 
 export function VoteButtons({
   identificationId,
@@ -18,8 +19,13 @@ export function VoteButtons({
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [nudge, setNudge] = useState(false);
 
   const cast = (value: 1 | -1) => {
+    if (!loggedIn) {
+      setNudge(true);
+      return;
+    }
     setError(null);
     start(async () => {
       const res = await voteAction(identificationId, value);
@@ -38,7 +44,7 @@ export function VoteButtons({
           onClick={() => cast(1)}
           disabled={pending}
           aria-pressed={myVote === 1}
-          title={loggedIn ? "この説を支持する" : "ログインすると投票できます"}
+          title={loggedIn ? "この説を支持する" : "投票は1人1票なのでログインが要ります"}
           className={`${base} ${
             myVote === 1 ? "border-shu bg-shu text-paper" : "border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
           }`}
@@ -52,7 +58,7 @@ export function VoteButtons({
           onClick={() => cast(-1)}
           disabled={pending}
           aria-pressed={myVote === -1}
-          title={loggedIn ? "この説には賛成できない" : "ログインすると投票できます"}
+          title={loggedIn ? "この説には賛成できない" : "投票は1人1票なのでログインが要ります"}
           className={`${base} ${
             myVote === -1 ? "border-ink bg-ink text-paper" : "border-rule-2 text-ink-3 hover:border-ink hover:text-ink"
           }`}
@@ -62,6 +68,7 @@ export function VoteButtons({
           <span className="sr-only">不支持</span>
         </button>
       </div>
+      {nudge && <LoginNudge message="投票は1人1票です。" />}
       {error && <p className="text-[11px] text-shu">{error}</p>}
     </div>
   );

@@ -4,7 +4,6 @@ import { MapContribute } from "@/components/MapContribute";
 import type { MapPin } from "@/components/MapView";
 import { WorkFilterSelect } from "@/components/WorkFilterSelect";
 import { Card, Empty } from "@/components/ui";
-import { currentUser } from "@/lib/auth";
 import { MEDIUM_LABEL, getPins, listWorks, type Medium } from "@/lib/queries";
 
 export const metadata: Metadata = {
@@ -23,7 +22,6 @@ export default async function MapPage({
   searchParams: Promise<{ medium?: string; work?: string }>;
 }) {
   const { medium = "all", work: workSlug } = await searchParams;
-  const user = await currentUser();
   const works = await listWorks();
   const work = workSlug ? works.find((w) => w.slug === workSlug) : undefined;
   const pins = await getPins({ medium, workId: work?.id });
@@ -95,7 +93,7 @@ export default async function MapPage({
         )}
       </div>
 
-      <MapContribute pins={mapPins} loggedIn={!!user} height="clamp(360px, 58vh, 620px)" />
+      <MapContribute pins={mapPins} height="clamp(360px, 58vh, 620px)" />
 
       <section>
         <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">都道府県別</h2>

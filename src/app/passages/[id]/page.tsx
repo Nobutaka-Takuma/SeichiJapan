@@ -350,7 +350,7 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
             </ol>
           )}
 
-          <AddCandidateForm passageId={passage.id} loggedIn={!!user} />
+          <AddCandidateForm passageId={passage.id} />
         </section>
 
         {/* 地図と議論 */}
@@ -412,7 +412,6 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
               <CommentForm
                 passageId={passage.id}
                 candidates={passage.candidates.map((c) => ({ id: c.id, place_name: c.place_name }))}
-                loggedIn={!!user}
               />
             </div>
           </section>

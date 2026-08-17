@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toggleLikeAction } from "@/app/actions";
+import { LoginNudge } from "./LoginNudge";
 
 export function LikeButton({
   placeId,
@@ -19,10 +20,11 @@ export function LikeButton({
   const [pending, start] = useTransition();
   const [state, setState] = useState({ likes, liked });
   const [error, setError] = useState<string | null>(null);
+  const [nudge, setNudge] = useState(false);
 
   const toggle = () => {
     if (!loggedIn) {
-      setError("ログインするといいねできます");
+      setNudge(true);
       return;
     }
     setError(null);
@@ -59,6 +61,7 @@ export function LikeButton({
         <span className="tabular-nums">{state.likes}</span>
         <span className="sr-only">いいね</span>
       </button>
+      {nudge && <LoginNudge message="いいねはアカウントに紐づきます。" />}
       {error && <span className="text-[11px] text-shu">{error}</span>}
     </div>
   );

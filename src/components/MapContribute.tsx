@@ -17,11 +17,9 @@ const distance = (m: number) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}k
 
 export function MapContribute({
   pins,
-  loggedIn,
   height = 620,
 }: {
   pins: MapPin[];
-  loggedIn: boolean;
   height?: number | string;
 }) {
   const router = useRouter();
@@ -71,21 +69,15 @@ export function MapContribute({
               setFocus({ lat: h.lat, lng: h.lng, zoom: h.zoom, bounds: h.bounds, nonce: Date.now() })
             }
           />
-          {loggedIn ? (
-            <button
-              type="button"
-              onClick={() => (picking ? reset() : setPicking(true))}
-              className={`shrink-0 rounded px-3 py-2 text-xs font-bold ${
-                picking ? "bg-ink text-paper" : "bg-shu text-paper hover:opacity-90"
-              }`}
-            >
-              {picking ? "書き込みをやめる" : "＋ 地図に書き込む"}
-            </button>
-          ) : (
-            <Link href="/login?next=/map" className="shrink-0 rounded bg-shu px-3 py-2 text-xs font-bold text-paper">
-              ログインして地図に書き込む
-            </Link>
-          )}
+          <button
+            type="button"
+            onClick={() => (picking ? reset() : setPicking(true))}
+            className={`shrink-0 rounded px-3 py-2 text-xs font-bold ${
+              picking ? "bg-ink text-paper" : "bg-shu text-paper hover:opacity-90"
+            }`}
+          >
+            {picking ? "書き込みをやめる" : "＋ 地図に書き込む"}
+          </button>
           {/* 携帯では、書き込み中の案内だけを残して地図の面積を稼ぐ */}
           <p className={`text-xs text-ink-3 ${picking ? "w-full sm:w-auto" : "hidden sm:block"}`}>
             {picking ? "地図の上で、シーンの場所を押してください" : "地名を入れると、その周辺まで一息で移動します"}
@@ -128,6 +120,13 @@ export function MapContribute({
             </div>
             <p className="-mt-3 text-[11px] tabular-nums text-ink-3">
               {picked.lat}, {picked.lng}（ピンをドラッグで微調整）
+            </p>
+            <p className="-mt-3 text-[11px] leading-relaxed text-ink-3">
+              ログインは要りません。
+              <Link href="/register?next=/map" className="font-bold text-shu hover:underline">
+                アカウントを作る
+              </Link>
+              と、自分の記録として残せます。
             </p>
 
             {/* 場所 */}

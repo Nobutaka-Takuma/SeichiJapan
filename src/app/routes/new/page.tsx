@@ -1,16 +1,12 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { RouteEditor } from "@/components/RouteEditor";
+import { SigningAs } from "@/components/SigningAs";
 import { Card } from "@/components/ui";
-import { currentUser } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "コースを作る" };
 
 export default async function NewRoutePage() {
-  const user = await currentUser();
-  if (!user) redirect("/login?next=/routes/new");
-
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <nav className="text-xs text-ink-3">
@@ -32,6 +28,8 @@ export default async function NewRoutePage() {
       <Card className="p-5 sm:p-6">
         <RouteEditor />
       </Card>
+
+      <SigningAs next="/routes/new" />
     </div>
   );
 }

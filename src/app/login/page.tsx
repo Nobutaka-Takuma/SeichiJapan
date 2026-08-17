@@ -11,12 +11,16 @@ export const metadata: Metadata = { title: "ログイン" };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   if (await currentUser()) redirect("/");
   const { next } = await searchParams;
+  const backTo = next ? `?next=${encodeURIComponent(next)}` : "";
 
   return (
     <div className="mx-auto max-w-md space-y-5 py-6">
       <div>
         <h1 className="font-serif text-2xl font-bold tracking-wide">ログイン</h1>
-        <p className="mt-1 text-sm text-ink-3">投票・比定の投稿・議論への参加にはログインが必要です。</p>
+        <p className="mt-1 text-sm leading-relaxed text-ink-3">
+          編集や投稿にログインは要りません。ログインが要るのは、いいね・投票と、
+          旅の記録（行った場所・コースの踏破）です。
+        </p>
       </div>
 
       <Card className="p-6">
@@ -25,7 +29,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
       <p className="text-center text-sm text-ink-3">
         はじめての方は{" "}
-        <Link href="/register" className="font-bold text-shu hover:underline">
+        <Link href={`/register${backTo}`} className="font-bold text-shu hover:underline">
           新規登録
         </Link>
       </p>
