@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:setup": "tsx scripts/setup-db.mts",
-    "admin": "tsx scripts/admin.mts"
+    "admin": "tsx scripts/admin.mts",
+    "intake": "tsx scripts/intake.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.5",

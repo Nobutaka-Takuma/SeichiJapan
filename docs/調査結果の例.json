@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "pack_id": "0004-sample",
+  "description": "指示書の書き方の例（そのまま取り込むためのものではありません）",
+  "works": [
+    {
+      "slug": "kimi-no-na-wa",
+      "title": "君の名は。",
+      "author": "新海誠",
+      "medium": "anime",
+      "year": 2016,
+      "description": "入れ替わりを描いた長編アニメーション。東京と飛騨の風景が精密に描かれる。"
+    }
+  ],
+  "places": [
+    {
+      "name": "須賀神社 男坂",
+      "official_name": "須賀神社",
+      "prefecture": "東京都",
+      "municipality": "新宿区",
+      "address": "新宿区須賀町5",
+      "wikidata": "Q11529113",
+      "osm": null,
+      "lat": 35.6873,
+      "lng": 139.7205,
+      "precision": "point",
+      "precision_note": "石段の下端",
+      "note": "四谷の高台にある神社。作品の終盤に出る石段で知られる。",
+      "body": "四谷総鎮守。天保年間の再建で、境内には三十六歌仙絵が伝わる。\n\n■ 男坂\n表参道にあたる石段。上りきると正面に住宅街が開ける。",
+      "access": "JR・地下鉄「四ツ谷駅」から徒歩10分ほど。石段の周囲は住宅地です。長居せず、道の端で。",
+      "sources": [
+        "https://example.com/official-map"
+      ],
+      "is_private_property": false
+    }
+  ],
+  "scenes": [
+    {
+      "work": "kimi-no-na-wa",
+      "place": "須賀神社 男坂",
+      "chapter": "終盤",
+      "kind": "scene",
+      "quote": "瀧と三葉がすれ違い、そして振り返る石段。",
+      "rationale": "手すりの意匠と段数、正面の街灯の位置が作中の背景と一致する。公開後に多くの来訪者が確認している。",
+      "evidence": "research",
+      "sources": [
+        "https://example.com/official-map"
+      ],
+      "uncertainty": null
+    }
+  ]
+}
