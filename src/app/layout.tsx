@@ -67,6 +67,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   >
                     ＋ 書き込む
                   </Link>
+                  {user.is_admin && (
+                    <Link href="/admin" className="text-xs font-bold text-ai hover:text-shu" title="管理">
+                      管理
+                    </Link>
+                  )}
                   <Link href={`/users/${user.handle}`} className="hidden text-ink-2 hover:text-shu sm:inline">
                     {user.display_name}
                   </Link>

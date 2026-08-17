@@ -3,11 +3,13 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { AddCandidateForm } from "@/components/AddCandidateForm";
 import { CommentForm } from "@/components/CommentForm";
+import { DeleteButton } from "@/components/DeleteButton";
 import { MapView, type MapPin } from "@/components/MapView";
 import { PassageLinkList } from "@/components/PassageLinkList";
 import { VoteButtons } from "@/components/VoteButtons";
 import { WikiText } from "@/components/WikiText";
 import { Card, ConfidenceBar, ConsensusBadge, Empty, PassageQuote } from "@/components/ui";
+import { deleteCommentAction, deleteIdentificationAction, deletePassageAction } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import { CONSENSUS_LABEL } from "@/lib/confidence";
 import { resolveWikiLinks } from "@/lib/pilgrimage";
@@ -163,6 +165,7 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
             </Link>
           </span>
         </div>
+
         <div className="mt-3 text-xl sm:text-2xl">
           <PassageQuote kind={passage.kind} quote={passage.quote} />
         </div>
@@ -211,6 +214,17 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
             </>
           )}
         </p>
+
+        {user?.is_admin && (
+          <div className="mt-4 max-w-xl">
+            <DeleteButton
+              action={deletePassageAction}
+              id={passage.id}
+              what="この記述と、そこに付いた説・票・コメント"
+              label="この記述を削除"
+            />
+          </div>
+        )}
       </header>
 
       {/* 作品のなかを順に読み進める */}
@@ -314,12 +328,22 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
                       )}
                     </div>
 
-                    <Link
-                      href={`/places/${c.place_id}`}
-                      className="mt-3 inline-block text-xs font-bold text-shu hover:underline"
-                    >
-                      {c.place_name}の項目を読む →
-                    </Link>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <Link
+                        href={`/places/${c.place_id}`}
+                        className="text-xs font-bold text-shu hover:underline"
+                      >
+                        {c.place_name}の項目を読む →
+                      </Link>
+                      {user?.is_admin && (
+                        <DeleteButton
+                          action={deleteIdentificationAction}
+                          id={c.id}
+                          what={`「${c.place_name}」説と、それに投じられた票`}
+                          label="この説を削除"
+                        />
+                      )}
+                    </div>
                   </Card>
                 </li>
               ))}
@@ -369,6 +393,15 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
                         )}
                       </div>
                       <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{c.body}</p>
+                      {user?.is_admin && (
+                        <div className="mt-2">
+                          <DeleteButton
+                            action={deleteCommentAction}
+                            id={c.id}
+                            what="このコメント"
+                          />
+                        </div>
+                      )}
                     </Card>
                   </li>
                 ))}

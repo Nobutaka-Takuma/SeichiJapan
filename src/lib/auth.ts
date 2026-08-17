@@ -7,13 +7,13 @@ import { ensureDatabaseReady } from "./data";
 const COOKIE = "seichi_session";
 const MAX_AGE = 60 * 60 * 24 * 30;
 
-export type SessionUser = { id: number; handle: string; display_name: string };
+export type SessionUser = { id: number; handle: string; display_name: string; is_admin: boolean };
 
 export async function currentUser(): Promise<SessionUser | null> {
   const token = (await cookies()).get(COOKIE)?.value;
   if (!token) return null;
   const row = await one<SessionUser>(
-    `SELECT u.id, u.handle, u.display_name
+    `SELECT u.id, u.handle, u.display_name, COALESCE(u.is_admin, false) AS is_admin
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = $1`,
     [token],
@@ -24,6 +24,18 @@ export async function currentUser(): Promise<SessionUser | null> {
 export async function requireUser(): Promise<SessionUser> {
   const user = await currentUser();
   if (!user) throw new Error("ログインが必要です");
+  return user;
+}
+
+/**
+ * 管理者だけが通る関門。
+ *
+ * 削除は取り消せないので、権限はここ一箇所でだけ判定する。
+ * 画面にボタンを出さないのは目隠しにすぎないから、実際の処理は必ずこれを通す。
+ */
+export async function requireAdmin(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (!user.is_admin) throw new Error("この操作は管理者だけが行えます");
   return user;
 }
 
@@ -54,20 +66,21 @@ export async function register(handle: string, displayName: string, password: st
   );
   const id = rows[0].id;
   await startSession(id);
-  return { id, handle, display_name: displayName.trim() || handle };
+  return { id, handle, display_name: displayName.trim() || handle, is_admin: false };
 }
 
 export async function login(handle: string, password: string): Promise<SessionUser> {
   await ensureDatabaseReady();
   const row = await one<SessionUser & { password_hash: string }>(
-    "SELECT id, handle, display_name, password_hash FROM users WHERE handle = $1",
+    `SELECT id, handle, display_name, password_hash, COALESCE(is_admin, false) AS is_admin
+       FROM users WHERE handle = $1`,
     [handle],
   );
   if (!row || !verifyPassword(password, row.password_hash)) {
     throw new Error("IDまたはパスワードが違います");
   }
   await startSession(row.id);
-  return { id: row.id, handle: row.handle, display_name: row.display_name };
+  return { id: row.id, handle: row.handle, display_name: row.display_name, is_admin: row.is_admin };
 }
 
 export async function logout() {

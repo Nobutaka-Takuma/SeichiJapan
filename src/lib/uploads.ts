@@ -103,3 +103,30 @@ export async function saveImage(file: unknown): Promise<string | null> {
 export function isStoredImagePath(value: string): boolean {
   return value.startsWith("/uploads/") && UPLOAD_NAME_RE.test(value.slice("/uploads/".length));
 }
+
+/**
+ * 保存済みの画像を消す。
+ *
+ * 権利者からの申し立てで消すときは、DBの行だけ消しても実物が残っていては
+ * 意味がないので、ここで実体も片づける。
+ * 失敗しても呼び出し側の処理は止めない（消し損ねはログに出す）。
+ */
+export async function deleteImage(publicPath: string): Promise<void> {
+  if (!isStoredImagePath(publicPath)) return;
+  const name = publicPath.slice("/uploads/".length);
+  try {
+    if (usingSupabaseStorage()) {
+      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${name}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${SUPABASE_KEY}` },
+      });
+      if (!res.ok && res.status !== 404) {
+        console.error(`画像を消せませんでした: ${name} (${res.status})`);
+      }
+    } else {
+      await fs.rm(localPath(name), { force: true });
+    }
+  } catch (e) {
+    console.error(`画像を消せませんでした: ${name}`, e);
+  }
+}

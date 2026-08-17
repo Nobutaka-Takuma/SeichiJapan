@@ -155,6 +155,25 @@ export default function AboutPage() {
       </section>
 
       <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">消されることについて</h2>
+        <p className="leading-loose text-ink-2">
+          間違いは<strong className="font-bold text-ink">直せば済みます</strong>。
+          おかしな変更は履歴から一手で差し戻せるので、ふつうは削除の出番はありません。
+        </p>
+        <p className="leading-loose text-ink-2">
+          それでも消さざるを得ないものがあります。宣伝目的の書き込み、
+          権利者から申し立てのあった画像、間違って二重に作られた項目。
+          これらは管理者が消せるようにしてあります。
+          <strong className="font-bold text-ink">削除は元に戻せません</strong>が、
+          誰が何をなぜ消したかは必ず記録に残ります。
+        </p>
+        <p className="leading-loose text-ink-2">
+          自分の書いたものが消えていて納得がいかないときは、記録に残っている理由を
+          手がかりに、書き直すか、議論の場で声を上げてください。
+        </p>
+      </section>
+
+      <section className="space-y-4">
         <h2 className="font-serif text-xl font-bold tracking-wide">いいね</h2>
         <p className="leading-loose text-ink-2">
           行ってよかった場所、よく書けている項目にいいねを付けてください。

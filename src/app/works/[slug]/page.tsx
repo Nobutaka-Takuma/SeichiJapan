@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { DeleteButton } from "@/components/DeleteButton";
 import { MapView, type MapPin } from "@/components/MapView";
 import { Card, ConfidenceBar, ConsensusBadge, Empty, MediumBadge, PassageQuote, Stat } from "@/components/ui";
+import { deleteWorkAction } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import { decodeParam } from "@/lib/params";
 import { getPins, getWork, getWorkPassages } from "@/lib/queries";
@@ -75,6 +77,18 @@ export default async function WorkPage({ params }: { params: Promise<{ slug: str
           <Stat label="参加ユーザー" value={work.contributor_count} unit="人" />
         </dl>
       </header>
+
+      {user?.is_admin && (
+        <div className="max-w-xl">
+          <DeleteButton
+            action={deleteWorkAction}
+            id={work.id}
+            what={`『${work.title}』と、この作品の記述 ${work.passage_count}件すべて`}
+            label="この作品を削除"
+            confirmTitle={work.title}
+          />
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         {mapPins.length === 0 ? (

@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { one, query, tx, type Executor } from "@/lib/db";
 import { ensureDatabaseReady } from "@/lib/data";
-import { currentUser, login, logout, register } from "@/lib/auth";
-import { UploadError, saveImage } from "@/lib/uploads";
+import { currentUser, login, logout, register, requireAdmin } from "@/lib/auth";
+import { UploadError, deleteImage, saveImage } from "@/lib/uploads";
 
 export type FormState = { error?: string; ok?: string };
 
@@ -747,4 +747,233 @@ export async function saveRouteAction(_prev: FormState, fd: FormData): Promise<F
   revalidatePath("/routes");
   revalidatePath(`/routes/${encodeURIComponent(slug)}`);
   return { ok: "保存しました", slug };
+}
+
+/* ---------- 管理者による削除 ---------- */
+
+/**
+ * 削除は実体を消す。表示から隠すだけにすると、絞り込みを書き忘れた
+ * 問い合わせが1本でもあれば漏れてしまい、権利者からの申し立てに応えられない。
+ *
+ * そのかわり、消したものは `deletions` に丸ごと控える。
+ * 取り消しはできないが、誰が・何を・なぜ消したかは必ず残る。
+ */
+
+/** 削除しようとしている当人が管理者か、実際に消す直前に必ず確かめる。 */
+async function record(
+  x: Executor,
+  adminId: number,
+  kind: string,
+  targetId: number,
+  label: string,
+  reason: string,
+  snapshot: unknown,
+) {
+  await x.query(
+    `INSERT INTO deletions (kind, target_id, label, reason, snapshot, admin_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [kind, targetId, label.slice(0, 200), reason, JSON.stringify(snapshot ?? null), adminId],
+  );
+}
+
+/** 削除に添える理由。何を消したのか後から分かるように、必ず書いてもらう。 */
+function deleteReason(fd: FormData): string {
+  const reason = str(fd, "reason");
+  if (reason.length < 4) throw new Error("削除の理由を書いてください（4文字以上）");
+  return reason.slice(0, 500);
+}
+
+export async function deletePlaceAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const admin = await requireAdmin();
+    const reason = deleteReason(fd);
+    const id = Number(fd.get("id"));
+
+    const images = await tx(async (x) => {
+      const rows = await x.query<Record<string, unknown> & { name: string; photo_path: string }>(
+        "SELECT * FROM places WHERE id = $1",
+        [id],
+      );
+      const place = rows[0];
+      if (!place) throw new Error("その場所はすでにありません");
+
+      // 一緒に消えるものも控えておく（この場所に結びついた説・版・いいね・訪問）
+      const idents = await x.query("SELECT * FROM identifications WHERE place_id = $1", [id]);
+      const revisions = await x.query("SELECT * FROM place_revisions WHERE place_id = $1", [id]);
+
+      await record(x, admin.id, "place", id, place.name, reason, { place, idents, revisions });
+      // 外部キーの ON DELETE CASCADE が、説・版・いいね・訪問・コースの停留点を連れていく
+      await x.query("DELETE FROM places WHERE id = $1", [id]);
+      return [place.photo_path].filter(Boolean) as string[];
+    });
+
+    for (const path of images) await deleteImage(path);
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath("/places");
+  revalidatePath("/map");
+  revalidatePath("/areas");
+  redirect("/places");
+}
+
+export async function deletePassageAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  let back = "/works";
+  try {
+    const admin = await requireAdmin();
+    const reason = deleteReason(fd);
+    const id = Number(fd.get("id"));
+
+    const images = await tx(async (x) => {
+      const rows = await x.query<Record<string, unknown> & { quote: string; image_path: string }>(
+        "SELECT * FROM passages WHERE id = $1",
+        [id],
+      );
+      const passage = rows[0];
+      if (!passage) throw new Error("その記述はすでにありません");
+
+      const work = await x.query<{ slug: string; title: string }>(
+        "SELECT slug, title FROM works WHERE id = $1",
+        [passage.work_id],
+      );
+      back = work[0] ? `/works/${encodeURIComponent(work[0].slug)}` : "/works";
+
+      const idents = await x.query("SELECT * FROM identifications WHERE passage_id = $1", [id]);
+      const comments = await x.query("SELECT * FROM comments WHERE passage_id = $1", [id]);
+      const revisions = await x.query("SELECT * FROM passage_revisions WHERE passage_id = $1", [id]);
+
+      const label = `『${work[0]?.title ?? "?"}』${passage.quote.slice(0, 40)}`;
+      await record(x, admin.id, "passage", id, label, reason, { passage, idents, comments, revisions });
+      await x.query("DELETE FROM passages WHERE id = $1", [id]);
+      return [passage.image_path].filter(Boolean) as string[];
+    });
+
+    for (const path of images) await deleteImage(path);
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath("/works");
+  revalidatePath("/map");
+  redirect(back);
+}
+
+export async function deleteIdentificationAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  let back = "/works";
+  try {
+    const admin = await requireAdmin();
+    const reason = deleteReason(fd);
+    const id = Number(fd.get("id"));
+
+    await tx(async (x) => {
+      const rows = await x.query<Record<string, unknown> & { passage_id: number }>(
+        "SELECT * FROM identifications WHERE id = $1",
+        [id],
+      );
+      const ident = rows[0];
+      if (!ident) throw new Error("その説はすでにありません");
+      back = `/passages/${ident.passage_id}`;
+
+      const place = await x.query<{ name: string }>("SELECT name FROM places WHERE id = $1", [ident.place_id]);
+      const votes = await x.query("SELECT * FROM votes WHERE identification_id = $1", [id]);
+
+      await record(x, admin.id, "identification", id, `${place[0]?.name ?? "?"} 説`, reason, { ident, votes });
+      await x.query("DELETE FROM identifications WHERE id = $1", [id]);
+    });
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath(back);
+  redirect(back);
+}
+
+export async function deleteCommentAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  let back = "/works";
+  try {
+    const admin = await requireAdmin();
+    const reason = deleteReason(fd);
+    const id = Number(fd.get("id"));
+
+    await tx(async (x) => {
+      const rows = await x.query<Record<string, unknown> & { body: string; passage_id: number }>(
+        "SELECT * FROM comments WHERE id = $1",
+        [id],
+      );
+      const comment = rows[0];
+      if (!comment) throw new Error("そのコメントはすでにありません");
+      back = `/passages/${comment.passage_id}`;
+
+      await record(x, admin.id, "comment", id, comment.body.slice(0, 60), reason, comment);
+      await x.query("DELETE FROM comments WHERE id = $1", [id]);
+    });
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath(back);
+  return { ok: "削除しました" };
+}
+
+export async function deleteRouteAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const admin = await requireAdmin();
+    const reason = deleteReason(fd);
+    const id = Number(fd.get("id"));
+
+    await tx(async (x) => {
+      const rows = await x.query<Record<string, unknown> & { title: string }>(
+        "SELECT * FROM routes WHERE id = $1",
+        [id],
+      );
+      const route = rows[0];
+      if (!route) throw new Error("そのコースはすでにありません");
+      const stops = await x.query("SELECT * FROM route_stops WHERE route_id = $1 ORDER BY position", [id]);
+
+      await record(x, admin.id, "route", id, route.title, reason, { route, stops });
+      await x.query("DELETE FROM routes WHERE id = $1", [id]);
+    });
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath("/routes");
+  redirect("/routes");
+}
+
+/**
+ * 作品ごと消す。記述もすべて連れていくので、いちばん重い操作になる。
+ * 取り違えを防ぐため、作品名をそのまま入力してもらう。
+ */
+export async function deleteWorkAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const admin = await requireAdmin();
+    const reason = deleteReason(fd);
+    const id = Number(fd.get("id"));
+    const typed = str(fd, "confirm_title");
+
+    const images = await tx(async (x) => {
+      const rows = await x.query<Record<string, unknown> & { title: string }>(
+        "SELECT * FROM works WHERE id = $1",
+        [id],
+      );
+      const work = rows[0];
+      if (!work) throw new Error("その作品はすでにありません");
+      if (typed !== work.title) throw new Error("確認のため、作品名をそのとおりに入力してください");
+
+      const passages = await x.query<{ image_path: string }>("SELECT * FROM passages WHERE work_id = $1", [id]);
+      await record(x, admin.id, "work", id, work.title, reason, { work, passages });
+      await x.query("DELETE FROM works WHERE id = $1", [id]);
+      return passages.map((p) => p.image_path).filter(Boolean);
+    });
+
+    for (const path of images) await deleteImage(path);
+  } catch (e) {
+    return fail(e);
+  }
+
+  revalidatePath("/works");
+  revalidatePath("/map");
+  redirect("/works");
 }

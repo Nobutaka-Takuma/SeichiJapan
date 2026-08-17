@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { DeleteButton } from "@/components/DeleteButton";
 import { MapView, type MapPin } from "@/components/MapView";
 import { VisitButton } from "@/components/VisitButton";
 import { Card } from "@/components/ui";
+import { deleteRouteAction } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import { decodeParam } from "@/lib/params";
 import { getRoute } from "@/lib/pilgrimage";
@@ -85,6 +87,17 @@ export default async function RoutePage({ params }: { params: Promise<{ slug: st
             </span>
           )}
         </div>
+
+        {user?.is_admin && (
+          <div className="max-w-xl">
+            <DeleteButton
+              action={deleteRouteAction}
+              id={route.id}
+              what={`巡礼コース「${route.title}」`}
+              label="このコースを削除"
+            />
+          </div>
+        )}
 
         {/* 進捗 */}
         {user && (

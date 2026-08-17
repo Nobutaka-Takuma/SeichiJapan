@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { MapView } from "@/components/MapView";
+import { DeleteButton } from "@/components/DeleteButton";
 import { VisitButton } from "@/components/VisitButton";
 import { WikiText } from "@/components/WikiText";
 import { Card, MediumBadge, PassageQuote } from "@/components/ui";
+import { deletePlaceAction } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import {
   backlinks,
@@ -132,6 +134,15 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
             </Link>
           </span>
         </div>
+
+        {user?.is_admin && (
+          <DeleteButton
+            action={deletePlaceAction}
+            id={place.id}
+            what={`「${place.name}」の項目と、そこに結びついたシーン・いいね・訪問記録`}
+            label="この項目を削除"
+          />
+        )}
 
         {place.note && <p className="max-w-3xl font-serif text-base leading-loose sm:text-lg">{place.note}</p>}
 
