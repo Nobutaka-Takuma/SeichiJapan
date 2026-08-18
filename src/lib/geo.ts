@@ -18,6 +18,8 @@ export type GeoHit = {
   /** 範囲が分かるものは範囲で寄せる */
   bounds?: [[number, number], [number, number]];
   count?: number;
+  /** どの都道府県の話か。地方→県とたどる画面から、県の地図へ直接飛ぶために使う。 */
+  prefecture?: string;
 };
 
 /** 都道府県庁のおおよその位置。県名だけで引かれたときの行き先。 */
@@ -108,6 +110,7 @@ function areaHit(a: Area): GeoHit {
     kind: "area",
     label: a.muni,
     sub: `${a.pref}・登録された場所 ${a.lats.length}件`,
+    prefecture: a.pref,
     lat: (south + north) / 2,
     lng: (west + east) / 2,
     zoom: 14,
@@ -202,7 +205,7 @@ export async function searchGeo(term: string, limit = 8): Promise<GeoHit[]> {
   // 2. 都道府県
   for (const [name, lat, lng] of PREFECTURES) {
     if (name.includes(q) || name.replace(/[都道府県]$/, "") === q) {
-      hits.push({ kind: "prefecture", label: name, sub: "都道府県", lat, lng, zoom: 10 });
+      hits.push({ kind: "prefecture", label: name, sub: "都道府県", lat, lng, zoom: 10, prefecture: name });
     }
   }
 
@@ -227,6 +230,7 @@ export async function searchGeo(term: string, limit = 8): Promise<GeoHit[]> {
       kind: "place",
       label: p.name,
       sub: `${p.prefecture} ${p.address}`.trim(),
+      prefecture: p.prefecture,
       lat: p.lat,
       lng: p.lng,
       zoom: 16,

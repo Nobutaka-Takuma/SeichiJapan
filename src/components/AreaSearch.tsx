@@ -11,6 +11,7 @@ export type GeoHit = {
   zoom: number;
   bounds?: [[number, number], [number, number]];
   count?: number;
+  prefecture?: string;
 };
 
 const KIND_LABEL: Record<GeoHit["kind"], string> = {

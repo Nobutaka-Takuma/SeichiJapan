@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { LikeButton } from "@/components/LikeButton";
-import { MapView, type MapPin } from "@/components/MapView";
+import { RegionPicker, type PrefCount } from "@/components/RegionPicker";
 import { Card, ConfidenceBar, Empty, MediumBadge, SectionTitle, Stat } from "@/components/ui";
 import { currentUser } from "@/lib/auth";
 import {
   contestedPassages,
-  getPins,
+  countsByPrefecture,
   likedPlaceIds,
   listPlaces,
   listWorks,
@@ -19,29 +19,15 @@ export default async function Home() {
   const user = await currentUser();
   const stats = await siteStats();
   const works = (await listWorks()).slice(0, 6);
-  const pins = await getPins();
+  const counts = await countsByPrefecture();
   const popular = await listPlaces(6, "likes");
   const contested = await contestedPassages(2);
   const activity = await recentActivity(10);
 
   const likedIds = await likedPlaceIds(user?.id);
 
-  const mapPins: MapPin[] = pins
-    .filter((p) => p.rank === 0)
-    .map((p) => ({
-      id: p.identification_id,
-      lat: p.lat,
-      lng: p.lng,
-      title: p.place_name,
-      subtitle: p.work_title,
-      quote: p.quote.length > 60 ? `${p.quote.slice(0, 60)}…` : p.quote,
-      confidence: p.confidence,
-      primary: true,
-      disputed: p.disputed,
-      likes: p.likes,
-      image: p.image_path || undefined,
-      href: `/places/${p.place_id}`,
-    }));
+  const byPref: Record<string, PrefCount> = {};
+  for (const c of counts) byPref[c.prefecture] = { places: c.places, works: c.works };
 
   return (
     <div className="space-y-14">
@@ -94,20 +80,14 @@ export default async function Home() {
           </dl>
         </div>
 
-        <Card className="overflow-hidden">
-          <MapView pins={mapPins} height={480} />
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule px-4 py-2.5 text-[11px] text-ink-3">
-            <span className="flex items-center gap-1">
-              <i className="inline-block size-2.5 rounded-full" style={{ background: "#b4472e" }} />
-              定説（ピンの大きさは人気）
-            </span>
-            <span className="flex items-center gap-1">
-              <i className="inline-block size-2.5 rounded-full border border-dashed border-ink-3" />
-              異説あり
-            </span>
-            <Link href="/map" className="ml-auto font-bold text-shu hover:underline">
-              地図から書き込む →
-            </Link>
+        {/*
+          全国を一枚で出しても、点が小さく散らばるだけで何も読み取れない。
+          地方 → 都道府県 と絞ってから地図を出す。
+        */}
+        <Card className="p-5 sm:p-6">
+          <h2 className="font-serif text-lg font-bold tracking-wide">地図から探す</h2>
+          <div className="mt-3">
+            <RegionPicker counts={byPref} />
           </div>
         </Card>
       </section>

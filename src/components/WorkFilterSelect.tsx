@@ -11,10 +11,13 @@ export function WorkFilterSelect({
   works,
   value,
   medium,
+  keep,
 }: {
   works: { slug: string; title: string; author: string }[];
   value?: string;
   medium?: string;
+  /** 絞り込みを変えても残したい問い合わせ（見ている都道府県など）。 */
+  keep?: Record<string, string | undefined>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -27,6 +30,7 @@ export function WorkFilterSelect({
         disabled={pending}
         onChange={(e) => {
           const sp = new URLSearchParams();
+          for (const [k, v] of Object.entries(keep ?? {})) if (v) sp.set(k, v);
           if (medium && medium !== "all") sp.set("medium", medium);
           if (e.target.value) sp.set("work", e.target.value);
           start(() => router.push(`/map${sp.toString() ? `?${sp}` : ""}`));

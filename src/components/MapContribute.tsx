@@ -18,9 +18,12 @@ const distance = (m: number) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}k
 export function MapContribute({
   pins,
   height = 620,
+  focus: initialFocus,
 }: {
   pins: MapPin[];
   height?: number | string;
+  /** 最初に合わせたい範囲。ピンが1つも無い県を開いたときに使う。 */
+  focus?: MapFocus;
 }) {
   const router = useRouter();
   const [picking, setPicking] = useState(false);
@@ -29,7 +32,7 @@ export function MapContribute({
   const [target, setTarget] = useState<NearbyPlace | "new" | null>(null);
   const [state, action, pending] = useActionState<FormState & { placeId?: number }, FormData>(addSceneAction, {});
   const panelRef = useRef<HTMLDivElement>(null);
-  const [focus, setFocus] = useState<MapFocus | null>(null);
+  const [focus, setFocus] = useState<MapFocus | null>(initialFocus ?? null);
 
   // 地点が決まったら、近くの登録済みの場所を引く
   useEffect(() => {

@@ -512,7 +512,9 @@ export type Pin = {
 };
 
 /** 地図に落とすピン。各記述の候補すべてを返し、rank=0 が最有力。 */
-export async function getPins(opts: { workId?: number; medium?: string } = {}): Promise<Pin[]> {
+export async function getPins(
+  opts: { workId?: number; medium?: string; prefecture?: string } = {},
+): Promise<Pin[]> {
   await ready();
   const where: string[] = [];
   const params: unknown[] = [];
@@ -523,6 +525,10 @@ export async function getPins(opts: { workId?: number; medium?: string } = {}): 
   if (opts.medium && opts.medium !== "all") {
     params.push(opts.medium);
     where.push(`w.medium = $${params.length}`);
+  }
+  if (opts.prefecture) {
+    params.push(opts.prefecture);
+    where.push(PREF_MATCH.replace("$PREF$", `$${params.length}`));
   }
 
   const rows = await query<Omit<Pin, "confidence" | "rank" | "disputed">>(
@@ -563,6 +569,43 @@ export type SiteStats = {
   edits: number;
   photos: number;
 };
+
+/**
+ * 都道府県の欄をばらすSQL片。
+ *
+ * 「群馬県／新潟県」のように県をまたぐ場所がある（清水トンネルなど）。
+ * どちらの県から見ても出てくるように、数えるときも絞るときもここでばらす。
+ */
+const PREF_SPLIT = `regexp_split_to_table(pl.prefecture, '[／/・]')`;
+
+/** ある都道府県に属するか（県またぎも拾う）。 */
+export const PREF_MATCH = `EXISTS (
+  SELECT 1 FROM ${PREF_SPLIT} AS t WHERE trim(t) = $PREF$
+)`;
+
+export type PrefectureCount = { prefecture: string; places: number; works: number; likes: number };
+
+/**
+ * 都道府県ごとの数。地方 → 都道府県と絞っていく画面の見出しに使う。
+ *
+ * 0件の県も呼び出し側で並べたいので、ここでは「ある県」だけを返し、
+ * 足りない分は表（regions.ts）から補ってもらう。
+ */
+export async function countsByPrefecture(): Promise<PrefectureCount[]> {
+  await ready();
+  return query<PrefectureCount>(
+    `SELECT trim(pr) AS prefecture,
+            COUNT(DISTINCT pl.id)::int AS places,
+            COUNT(DISTINCT p.work_id)::int AS works,
+            (SELECT COUNT(*)::int FROM place_likes l WHERE l.place_id = ANY(array_agg(DISTINCT pl.id))) AS likes
+       FROM places pl
+       CROSS JOIN LATERAL ${PREF_SPLIT} AS pr
+       LEFT JOIN identifications i ON i.place_id = pl.id
+       LEFT JOIN passages p ON p.id = i.passage_id
+      WHERE trim(pr) <> ''
+      GROUP BY trim(pr)`,
+  );
+}
 
 export async function siteStats(): Promise<SiteStats> {
   await ready();
