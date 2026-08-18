@@ -6,12 +6,14 @@ import { CommentForm } from "@/components/CommentForm";
 import { DeleteButton } from "@/components/DeleteButton";
 import { MapView, type MapPin } from "@/components/MapView";
 import { PassageLinkList } from "@/components/PassageLinkList";
+import { QuotedImage } from "@/components/QuotedImage";
 import { VoteButtons } from "@/components/VoteButtons";
 import { WikiText } from "@/components/WikiText";
 import { Card, ConfidenceBar, ConsensusBadge, Empty, PassageQuote } from "@/components/ui";
 import { deleteCommentAction, deleteIdentificationAction, deletePassageAction } from "@/app/actions";
 import { currentUser } from "@/lib/auth";
 import { CONSENSUS_LABEL } from "@/lib/confidence";
+import { citationLine } from "@/lib/quote";
 import { resolveWikiLinks } from "@/lib/pilgrimage";
 import { EVIDENCE_LABEL, getComments, getPassage } from "@/lib/queries";
 import {
@@ -169,23 +171,29 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
         <div className="mt-3 text-xl sm:text-2xl">
           <PassageQuote kind={passage.kind} quote={passage.quote} />
         </div>
+        {passage.kind === "text" && (passage.citation_detail || passage.citation_source) && (
+          <p className="mt-2 text-xs text-ink-3">
+            出典：
+            {citationLine({
+              workTitle: passage.work.title,
+              author: passage.work.author,
+              detail: passage.citation_detail || passage.chapter,
+              source: passage.citation_source,
+            })}
+          </p>
+        )}
         {passage.image_path && (
-          <figure className="mt-5 max-w-2xl">
-            {/* 利用者が投稿した画像。サイズが不定なので next/image は使わない */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={passage.image_path}
-              alt={passage.image_caption || passage.work.title}
-              className="w-full rounded-lg border border-rule object-cover"
-              style={{ maxHeight: 420 }}
-            />
-            {(passage.image_caption || passage.image_credit) && (
-              <figcaption className="mt-1.5 text-xs text-ink-3">
-                {passage.image_caption}
-                {passage.image_credit && <span className="ml-2">（{passage.image_credit}）</span>}
-              </figcaption>
-            )}
-          </figure>
+          <QuotedImage
+            className="mt-5"
+            src={passage.image_path}
+            kind={passage.image_kind}
+            caption={passage.image_caption}
+            credit={passage.image_credit}
+            workTitle={passage.work.title}
+            author={passage.work.author}
+            detail={passage.citation_detail || passage.chapter}
+            source={passage.citation_source}
+          />
         )}
         {passage.note && (
           <p className="mt-4 max-w-3xl rounded-md bg-paper-2/60 px-4 py-3 text-sm leading-relaxed text-ink-2">

@@ -193,6 +193,15 @@ CREATE TABLE IF NOT EXISTS data_packs (
 -- 管理者の権限。既存のDBにも後から足せるように ALTER で書く。
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
 
+-- 作品からの引用を、現地写真と区別して扱うための欄。
+--
+-- 引用（著作権法32条）が成り立つには、出所の明示と、引用部分が
+-- 自分の記述に対して従であることが要る。そのために
+-- 「これは引用か」「どこからの引用か」を構造として持たせる。
+ALTER TABLE passages ADD COLUMN IF NOT EXISTS image_kind TEXT NOT NULL DEFAULT 'site_photo';
+ALTER TABLE passages ADD COLUMN IF NOT EXISTS citation_detail TEXT NOT NULL DEFAULT '';
+ALTER TABLE passages ADD COLUMN IF NOT EXISTS citation_source TEXT NOT NULL DEFAULT '';
+
 -- 名乗らずに書いた人。
 --
 -- 匿名でも users の行をひとつ持たせる。こうしておくと、履歴・差分・差し戻し・

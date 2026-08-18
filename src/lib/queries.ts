@@ -82,6 +82,9 @@ export type PassageWithCandidates = {
   image_path: string;
   image_caption: string;
   image_credit: string;
+  image_kind: string;
+  citation_detail: string;
+  citation_source: string;
   created_at: string;
   updated_at: string | null;
   editor_handle: string | null;
@@ -99,6 +102,9 @@ type PassageRow = Omit<PassageWithCandidates, "candidates" | "consensus" | "vote
 
 const PASSAGE_COLUMNS = `p.id, p.work_id, p.chapter, p.kind, p.quote, p.note, p.created_at,
        p.image_path, p.image_caption, p.image_credit, p.updated_at,
+       COALESCE(p.image_kind, 'site_photo') AS image_kind,
+       COALESCE(p.citation_detail, '') AS citation_detail,
+       COALESCE(p.citation_source, '') AS citation_source,
        (SELECT handle FROM users WHERE id = p.updated_by) AS editor_handle,
        (SELECT display_name FROM users WHERE id = p.updated_by) AS editor_name,
        (SELECT COUNT(*)::int FROM passage_revisions r WHERE r.passage_id = p.id) AS revision_count,
@@ -403,6 +409,9 @@ export type Appearance = {
   image_path: string;
   image_caption: string;
   image_credit: string;
+  image_kind: string;
+  citation_detail: string;
+  citation_source: string;
   work_slug: string;
   work_title: string;
   work_author: string;
@@ -417,6 +426,9 @@ export async function getAppearances(placeId: number): Promise<Appearance[]> {
   const rows = await query<Omit<Appearance, "confidence" | "disputed">>(
     `SELECT i.passage_id, p.quote, p.kind, p.chapter, p.note,
             p.image_path, p.image_caption, p.image_credit,
+            COALESCE(p.image_kind, 'site_photo') AS image_kind,
+            COALESCE(p.citation_detail, '') AS citation_detail,
+            COALESCE(p.citation_source, '') AS citation_source,
             w.slug AS work_slug, w.title AS work_title, w.author AS work_author, w.medium
        FROM identifications i
        JOIN passages p ON p.id = i.passage_id

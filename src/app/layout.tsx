@@ -53,6 +53,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Link href="/works" className="hover:text-shu">
                 作品
               </Link>
+              <Link href="/guess" className="hover:text-shu" title="この場面はどこ？">
+                クイズ
+              </Link>
               <Link href="/random" className="hover:text-shu" title="どこかの項目へ">
                 おまかせ
               </Link>
@@ -116,6 +119,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               </Link>
               <Link href="/works" className="hover:text-shu">
                 作品一覧
+              </Link>
+              <Link href="/rights" className="hover:text-shu">
+                引用と権利について
               </Link>
             </nav>
           </div>

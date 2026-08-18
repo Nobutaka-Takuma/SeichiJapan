@@ -27,7 +27,7 @@ const LATEST = PACKS[PACKS.length - 1].id;
  * これが `data_packs` に無ければ、既存のDBにもスキーマを流し直す。
  * ALTER はすべて IF NOT EXISTS なので、流し直しても壊れない。
  */
-const SCHEMA_ID = "schema-0003-anon";
+const SCHEMA_ID = "schema-0004-citation";
 
 /** 同時に複数のインスタンスが初期化しても衝突しないための鍵。 */
 const LOCK_KEY = 823_641_907;

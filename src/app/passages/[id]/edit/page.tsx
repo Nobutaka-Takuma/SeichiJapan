@@ -52,6 +52,9 @@ export default async function EditPassagePage({ params }: { params: Promise<{ id
             image_path: passage.image_path,
             image_caption: passage.image_caption,
             image_credit: passage.image_credit,
+            image_kind: passage.image_kind,
+            citation_detail: passage.citation_detail,
+            citation_source: passage.citation_source,
           }}
         />
       </Card>

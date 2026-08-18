@@ -64,6 +64,12 @@ export default async function Home() {
               ⇢ 巡礼コース
             </Link>
             <Link
+              href="/guess"
+              className="flex min-h-[48px] items-center rounded border border-rule-2 px-5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"
+            >
+              ？ この場面はどこ？
+            </Link>
+            <Link
               href="/random"
               prefetch={false}
               className="flex min-h-[48px] items-center rounded border border-rule-2 px-5 text-sm font-bold text-ink-2 hover:border-shu hover:text-shu"

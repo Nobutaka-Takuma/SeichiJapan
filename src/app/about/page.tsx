@@ -118,12 +118,48 @@ export default function AboutPage() {
       <section className="space-y-4">
         <h2 className="font-serif text-xl font-bold tracking-wide">画像について</h2>
         <p className="leading-loose text-ink-2">
-          <strong className="font-bold text-ink">自分で撮影した現地の写真を推奨します。</strong>
-          作品の映像・挿絵・スクリーンショットは権利者のものです。
-          引用の範囲を超える転載は避けてください。権利者から求めがあれば削除します。
+          画像には<strong className="font-bold text-ink">「現地の写真」と「作品からの引用」の別</strong>があります。
+          投稿するときにどちらかを選んでください。扱いが変わります。
         </p>
         <p className="leading-loose text-ink-2">
-          撮影者や出典が分かる場合は、画像に添えて記録してください。
+          <strong className="font-bold text-ink">現地の写真</strong>は、自分で撮ったものを使ってください。
+          いちばん勧めたいのはこちらです。権利の心配がなく、季節や時間帯の違いも写り、
+          「いま行くとこう見える」という、作品にはない情報が加わります。
+        </p>
+        <p className="leading-loose text-ink-2">
+          <strong className="font-bold text-ink">作品からの引用</strong>は、
+          場面そのものを見せないと伝わらないときのためのものです。
+          掲載箇所と出典を書いてもらい、掲載時は「引用」と分かる枠で囲って出します。
+          あなた自身の説明を添えていない引用は保存できません。詳しくは{" "}
+          <Link href="/rights" className="font-bold text-shu hover:underline">
+            引用と権利について
+          </Link>
+          をご覧ください。
+        </p>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-serif text-xl font-bold tracking-wide">この場面はどこ？</h2>
+        <p className="leading-loose text-ink-2">
+          手がかりを見て、地図の上で場所を当てる遊びです。近いほど高得点。
+          答え合わせのあと、その場所の項目や行き方へ進めます。
+          知らない作品の知らない土地に出会う入口としても使えます。
+        </p>
+        <p className="leading-loose text-ink-2">
+          手がかりに使うのは、投稿者が撮った現地の写真と、投稿者が自分の言葉で書いた場面の記述、
+          それに保護期間の終わった作品の本文です。
+          <strong className="font-bold text-ink">作品から引用した画像は、遊びの題材には使いません。</strong>
+          引用は説明の裏づけとして載せるものだからです。
+        </p>
+        <p className="leading-loose text-ink-2">
+          <Link href="/guess" className="font-bold text-shu hover:underline">
+            遊んでみる
+          </Link>
+          ／ 手がかりを増やすには、
+          <Link href="/scenes/new" className="font-bold text-shu hover:underline">
+            現地の写真を添えてシーンを登録
+          </Link>
+          してください。
         </p>
       </section>
 

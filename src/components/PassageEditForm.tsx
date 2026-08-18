@@ -19,6 +19,9 @@ export function PassageEditForm({
     image_path: string;
     image_caption: string;
     image_credit: string;
+    image_kind: string;
+    citation_detail: string;
+    citation_source: string;
   };
 }) {
   const [state, action, pending] = useActionState<FormState, FormData>(editPassageAction, {});

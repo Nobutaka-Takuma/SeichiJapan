@@ -10,6 +10,9 @@ export type SceneDefaults = {
   image_path?: string;
   image_caption?: string;
   image_credit?: string;
+  image_kind?: string;
+  citation_detail?: string;
+  citation_source?: string;
 };
 
 const field = "w-full rounded border border-rule-2 bg-card px-3 py-2 text-sm outline-none focus:border-shu";
@@ -23,8 +26,14 @@ export function SceneFields({
   compact?: boolean;
 }) {
   const [kind, setKind] = useState<"text" | "scene">(defaults.kind === "text" ? "text" : "scene");
+  const [imageKind, setImageKind] = useState<"site_photo" | "work_quote">(
+    defaults.image_kind === "work_quote" ? "work_quote" : "site_photo",
+  );
   const [preview, setPreview] = useState<string | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
+
+  // 本文引用か、作品からの画像引用。どちらでも出所の明示が要る。
+  const quoting = kind === "text" || imageKind === "work_quote";
 
   return (
     <>
@@ -54,7 +63,7 @@ export function SceneFields({
         {!compact && (
           <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
             {kind === "text"
-              ? "著作権の保護期間が終わっている作品以外は、引用の範囲を超えないよう短く。"
+              ? "本文をそのまま載せる形です。引用の範囲を超えないよう短くし、下の欄に掲載箇所と出典を書いてください。保護期間が終わっていない作品は特に慎重に。"
               : "台詞や文章をそのまま写さず、場面を自分の言葉で説明してください。"}
           </p>
         )}
@@ -134,24 +143,88 @@ export function SceneFields({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {preview && <img src={preview} alt="" className="h-32 w-full rounded object-cover" />}
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <input
-            name="image_caption"
-            defaultValue={defaults.image_caption ?? ""}
-            placeholder="画像の説明（任意）"
-            className={field}
-          />
-          <input
-            name="image_credit"
-            defaultValue={defaults.image_credit ?? ""}
-            placeholder="撮影者・出典（任意）"
-            className={field}
-          />
+        <div>
+          <span className="text-[11px] font-bold text-ink-2">この画像は</span>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {(
+              [
+                ["site_photo", "現地の写真"],
+                ["work_quote", "作品からの引用"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setImageKind(k)}
+                aria-pressed={imageKind === k}
+                className={`rounded-full px-3 py-1 text-[11px] font-bold ${
+                  imageKind === k
+                    ? "bg-ink text-paper"
+                    : "border border-rule-2 text-ink-2 hover:border-shu hover:text-shu"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <input type="hidden" name="image_kind" value={imageKind} />
         </div>
-        <p className="text-[11px] leading-relaxed text-ink-3">
-          自分で撮影した現地写真を推奨します。作品の映像・挿絵は権利者のものです。
-        </p>
+
+        <input
+          name="image_caption"
+          defaultValue={defaults.image_caption ?? ""}
+          placeholder={imageKind === "work_quote" ? "どの場面か（任意）" : "写真の説明（任意）"}
+          className={field}
+        />
+
+        {imageKind === "site_photo" ? (
+          <>
+            <input
+              name="image_credit"
+              defaultValue={defaults.image_credit ?? ""}
+              placeholder="撮影者（任意）"
+              className={field}
+            />
+            <p className="text-[11px] leading-relaxed text-ink-3">
+              自分で撮影した写真を使ってください。他人の写真を無断で載せないでください。
+            </p>
+          </>
+        ) : (
+          <p className="rounded border border-dashed border-rule-2 bg-paper-2/40 p-3 text-[11px] leading-relaxed text-ink-3">
+            引用は<b className="text-ink-2">1シーンにつき1点まで</b>、必要な範囲で。
+            あなた自身の説明（上の「シーンの説明」）を添えたうえで、その裏づけとして載せてください。
+            説明のないまま画像だけを置くことはできません。
+            出所は下の「引用の出所」に書いてください。権利者から求めがあれば削除します。
+          </p>
+        )}
       </div>
+
+      {/*
+        本文引用でも画像引用でも、出所の欄はひとつだけ出す。
+        同じ name の入力を二重に置くと、送信時に片方しか残らない。
+      */}
+      {quoting && (
+        <div className="space-y-2 rounded border border-dashed border-shu/40 bg-shu-soft/30 p-3">
+          <p className="text-[11px] font-bold text-ink">
+            引用の出所（必須）
+          </p>
+          <input
+            name="citation_detail"
+            defaultValue={defaults.citation_detail ?? ""}
+            placeholder="掲載箇所 *（例：第3話、上・二、第2巻 p.45）"
+            className={field}
+          />
+          <input
+            name="citation_source"
+            defaultValue={defaults.citation_source ?? ""}
+            placeholder="出典 *（例：新潮文庫、◯◯社、△△製作委員会）"
+            className={field}
+          />
+          <p className="text-[11px] leading-relaxed text-ink-2">
+            掲載時は「引用」と分かる枠で囲い、この出所を必ず添えて表示します。
+          </p>
+        </div>
+      )}
     </>
   );
 }

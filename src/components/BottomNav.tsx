@@ -12,7 +12,7 @@ const ITEMS = [
   { href: "/map", label: "地図", icon: "▲" },
   { href: "/places", label: "聖地", icon: "■" },
   { href: "/routes", label: "コース", icon: "⇢" },
-  { href: "/random", label: "おまかせ", icon: "✦" },
+  { href: "/guess", label: "クイズ", icon: "？" },
 ];
 
 export function BottomNav() {

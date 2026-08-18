@@ -1,11 +1,24 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { one, query, tx, type Executor } from "@/lib/db";
 import { ensureDatabaseReady } from "@/lib/data";
 import { contributor, currentUser, login, logout, register, requireAdmin } from "@/lib/auth";
 import { UploadError, deleteImage, saveImage } from "@/lib/uploads";
+import { asImageKind, checkQuotation } from "@/lib/quote";
+import {
+  distanceM,
+  makeRounds,
+  openRounds,
+  scoreFor,
+  sealRounds,
+  type Clue,
+} from "@/lib/guess";
+
+/** 出題の控えを入れておく Cookie。答えが入るので httpOnly。 */
+const GUESS_COOKIE = "seichi_guess";
 
 export type FormState = { error?: string; ok?: string };
 
@@ -231,6 +244,17 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
   const quote = str(fd, "quote");
   if (quote.length < 5) return { error: "本文または場面の記述を5文字以上で書いてください" };
 
+  const imageKind = asImageKind(str(fd, "image_kind"));
+  const problem = checkQuotation({
+    kind: str(fd, "kind") || "scene",
+    imageKind,
+    citationDetail: str(fd, "citation_detail"),
+    citationSource: str(fd, "citation_source"),
+    // 引用に添える「主」の記述。場面の説明と補足メモを合わせて見る
+    commentary: `${str(fd, "note")}${str(fd, "kind") === "text" ? "" : quote}`,
+  });
+  if (problem) return { error: problem };
+
   try {
     const user = await contributor();
 
@@ -244,8 +268,9 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
         `UPDATE passages
             SET chapter = $1, kind = $2, quote = $3, note = $4,
                 image_path = $5, image_caption = $6, image_credit = $7,
-                updated_at = now(), updated_by = $8
-          WHERE id = $9`,
+                image_kind = $8, citation_detail = $9, citation_source = $10,
+                updated_at = now(), updated_by = $11
+          WHERE id = $12`,
         [
           str(fd, "chapter"),
           str(fd, "kind") || "scene",
@@ -254,6 +279,9 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
           image,
           str(fd, "image_caption"),
           str(fd, "image_credit"),
+          imageKind,
+          str(fd, "citation_detail"),
+          str(fd, "citation_source"),
           user.id,
           passageId,
         ],
@@ -381,6 +409,16 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
   const quote = str(fd, "quote");
   if (quote.length < 5) return { error: "シーンの説明を5文字以上で書いてください" };
 
+  // 引用として足りないものがあれば、画像を保存する前に断る
+  const citationProblem = checkQuotation({
+    kind: str(fd, "kind") || "scene",
+    imageKind: asImageKind(str(fd, "image_kind")),
+    citationDetail: str(fd, "citation_detail"),
+    citationSource: str(fd, "citation_source"),
+    commentary: `${str(fd, "note")}${str(fd, "kind") === "text" ? "" : quote}`,
+  });
+  if (citationProblem) return { error: citationProblem };
+
   const user = await contributor();
   let image: string | null = null;
   try {
@@ -435,8 +473,9 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
 
       const passage = await x.query<{ id: number }>(
         `INSERT INTO passages
-           (work_id, chapter, kind, quote, note, sort_order, created_by, image_path, image_caption, image_credit)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+           (work_id, chapter, kind, quote, note, sort_order, created_by,
+            image_path, image_caption, image_credit, image_kind, citation_detail, citation_source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
         [
           resolved.id,
           str(fd, "chapter"),
@@ -448,6 +487,9 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
           image ?? "",
           str(fd, "image_caption"),
           str(fd, "image_credit"),
+          asImageKind(str(fd, "image_kind")),
+          str(fd, "citation_detail"),
+          str(fd, "citation_source"),
         ],
       );
       const passageId = passage[0].id;
@@ -965,4 +1007,55 @@ export async function deleteWorkAction(_prev: FormState, fd: FormData): Promise<
   revalidatePath("/works");
   revalidatePath("/map");
   redirect("/works");
+}
+
+/* ---------- 「この場面はどこ？」 ---------- */
+
+/**
+ * 出題する。答えは署名した Cookie に隠し、画面には手がかりだけを返す。
+ * 答えを一緒に送ると、画面の中身を覗くだけで分かってしまうため。
+ */
+export async function startGuessAction(): Promise<{ clues: Clue[]; error?: string }> {
+  const rounds = await makeRounds();
+  if (rounds.length === 0) {
+    return { clues: [], error: "出題できる場所がまだありません。シーンを登録してみてください" };
+  }
+  (await cookies()).set(GUESS_COOKIE, sealRounds(rounds), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60,
+    secure: process.env.NODE_ENV === "production",
+  });
+  return { clues: rounds.map((r) => r.clue) };
+}
+
+export type GuessResult = {
+  error?: string;
+  distance_m?: number;
+  score?: number;
+  answer?: {
+    placeId: number;
+    name: string;
+    prefecture: string;
+    address: string;
+    lat: number;
+    lng: number;
+    passageId: number;
+    workSlug: string;
+    workTitle: string;
+  };
+};
+
+/** 採点する。距離の計算も答えの取り出しも、すべてサーバ側で行う。 */
+export async function submitGuessAction(index: number, lat: number, lng: number): Promise<GuessResult> {
+  const answers = openRounds((await cookies()).get(GUESS_COOKIE)?.value);
+  if (!answers) return { error: "出題が見つかりません。もう一度はじめてください" };
+
+  const answer = answers[index];
+  if (!answer) return { error: "その問題はありません" };
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { error: "地図の上で場所を指してください" };
+
+  const d = distanceM(answer.lat, answer.lng, lat, lng);
+  return { distance_m: d, score: scoreFor(d), answer };
 }

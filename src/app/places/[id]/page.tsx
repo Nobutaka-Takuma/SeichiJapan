@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { MapView } from "@/components/MapView";
+import { QuotedImage } from "@/components/QuotedImage";
 import { DeleteButton } from "@/components/DeleteButton";
 import { VisitButton } from "@/components/VisitButton";
 import { WikiText } from "@/components/WikiText";
@@ -237,17 +238,34 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
                 {appearances.map((a) => (
                   <li key={a.passage_id}>
                     <Card className="overflow-hidden">
-                      {a.image_path && (
-                        <a href={a.image_path} target="_blank" rel="noopener noreferrer">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={a.image_path}
-                            alt={a.image_caption || `${a.work_title}のシーン`}
-                            loading="lazy"
-                            className="h-48 w-full object-cover sm:h-56"
-                          />
-                        </a>
-                      )}
+                      {/*
+                        引用画像は拡大リンクを付けず、枠と出所を添えて出す。
+                        現地写真だけ、これまでどおり大きく見せる。
+                      */}
+                      {a.image_path &&
+                        (a.image_kind === "work_quote" ? (
+                          <div className="p-4 pb-0 sm:p-5 sm:pb-0">
+                            <QuotedImage
+                              src={a.image_path}
+                              kind={a.image_kind}
+                              caption={a.image_caption}
+                              workTitle={a.work_title}
+                              author={a.work_author}
+                              detail={a.citation_detail || a.chapter}
+                              source={a.citation_source}
+                            />
+                          </div>
+                        ) : (
+                          <a href={a.image_path} target="_blank" rel="noopener noreferrer">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={a.image_path}
+                              alt={a.image_caption || `${a.work_title}のシーン`}
+                              loading="lazy"
+                              className="h-48 w-full object-cover sm:h-56"
+                            />
+                          </a>
+                        ))}
                       <div className="p-4 sm:p-5">
                         <div className="flex flex-wrap items-center gap-2 text-xs text-ink-3">
                           <MediumBadge medium={a.medium} />
