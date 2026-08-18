@@ -137,9 +137,10 @@ async function fromAddress(q: string): Promise<Lookup> {
 /** すでに登録されている場所。名前の一致と、近さの両方で見る。 */
 async function existingNearby(name: string, lat: number | null, lng: number | null) {
   await ensureDatabaseReady();
-  const sameName = await query<{ id: number; name: string }>("SELECT id, name FROM places WHERE name = $1", [
-    name,
-  ]);
+  const sameName = await query<{ id: number; name: string; lat: number; lng: number }>(
+    "SELECT id, name, lat, lng FROM places WHERE name = $1",
+    [name],
+  );
   if (lat === null || lng === null) return { sameName, near: [] as { id: number; name: string; d: number }[] };
 
   const near = await query<{ id: number; name: string; d: number }>(
@@ -227,7 +228,10 @@ export async function checkPlace(p: PlaceInput): Promise<PlaceReport> {
     }
   }
   if (!resolved && p.address) {
-    const r = await fromAddress(`${p.prefecture}${p.address}`);
+    // 住所に県名が入っていることもあれば、入っていないこともある。
+    // 前に足すのは、入っていないときだけ（「静岡県静岡県沼津市…」を防ぐ）
+    const full = p.address.startsWith(p.prefecture) ? p.address : `${p.prefecture}${p.address}`;
+    const r = await fromAddress(full);
     resolved = r.coords;
     unreachable ||= r.unreachable;
     if (resolved) source = "nominatim";
@@ -300,11 +304,32 @@ export async function checkPlace(p: PlaceInput): Promise<PlaceReport> {
 
   const { sameName, near } = await existingNearby(p.name, lat, lng);
   if (sameName.length > 0) {
+    const existing = sameName[0];
     findings.push({
       level: "info",
-      what: `同じ名前の項目がすでにあります（#${sameName[0].id}）`,
+      what: `同じ名前の項目がすでにあります（#${existing.id}）`,
       detail: "既存の記事は上書きされません。シーンだけが足されます",
     });
+
+    /*
+     * 同じ名前でも座標がずれていることがある。
+     * 取り込みは既存の項目に触れないので、**古いほうの座標が残ったまま**になる。
+     * 黙って通すといちばん困るところなので、離れていたら必ず言う。
+     */
+    if (lat !== null && lng !== null && existing.lat !== null) {
+      const gap = dist(existing.lat, existing.lng, lat, lng);
+      const tol = TOLERANCE_M[p.precision] ?? 150;
+      if (gap > tol) {
+        findings.push({
+          level: "warn",
+          what: `既存の #${existing.id} とは座標が ${gap}m ずれています`,
+          detail:
+            `既存: ${existing.lat}, ${existing.lng} ／ 今回: ${lat}, ${lng}。` +
+            "取り込んでも既存の座標は変わりません。どちらが正しいか確かめて、" +
+            `必要なら /places/${existing.id}/edit で直してください`,
+        });
+      }
+    }
   }
   for (const n of near) {
     findings.push({
