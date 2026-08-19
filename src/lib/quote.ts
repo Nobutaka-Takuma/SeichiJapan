@@ -42,23 +42,31 @@ export type QuoteInput = {
   imageKind: string;
   /** 掲載箇所。「第3話」「第2巻 p.45」など。 */
   citationDetail: string;
-  /** 出版社・配信元など。 */
+  /** 出版社・配信元など。**任意**。 */
   citationSource: string;
+  /** 章・話数の欄。ここに書いてあれば、掲載箇所はそれで足りる。 */
+  chapter?: string;
   /** こちらの記述（場面の説明・補足）。主従関係の「主」にあたる。 */
   commentary: string;
 };
 
 /** 引用に添える自分の記述の下限。これを切ると「引用だけの投稿」になる。 */
-export const COMMENTARY_MIN = 20;
+export const COMMENTARY_MIN = 10;
 
+/**
+ * 必須は**ひとつだけ**にしてある。
+ *
+ * 作品名と作者はすでに作品の側にあるので、あとは「どこの部分か」が分かればよい。
+ * それも、章・話数の欄に書いてあればそれで足りる（同じことを二度書かせない）。
+ * 出典（出版社・配信元）は、あれば添えるが必須にしない。
+ * 媒体によって書きようが違いすぎて、必須にすると書けない人が出るため。
+ */
 export function checkQuotation(q: QuoteInput): string | null {
   if (!isQuotation(q.kind, q.imageKind)) return null;
 
-  if (q.citationDetail.trim().length < 2) {
-    return "引用には掲載箇所が要ります（例：第3話、第2巻 p.45）。出所を示さない引用は認められません";
-  }
-  if (q.citationSource.trim().length < 2) {
-    return "引用には出典が要ります（例：◯◯社／△△製作委員会）";
+  const where = (q.citationDetail || q.chapter || "").trim();
+  if (!where) {
+    return "引用には出所が要ります。「掲載箇所」か「章・話数」のどちらかに、どの部分かを書いてください（例：第3話、第2巻 p.45）";
   }
   if (q.commentary.trim().length < COMMENTARY_MIN) {
     return `引用には、あなた自身の説明を${COMMENTARY_MIN}文字以上で添えてください。引用は説明の裏づけとして載せるものです`;

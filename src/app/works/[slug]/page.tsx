@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const work = await getWork(slug);
   if (!work) return { title: "作品が見つかりません" };
   return {
-    title: `${work.title}（${work.author}）の舞台地図`,
+    title: work.author ? `${work.title}（${work.author}）の舞台地図` : `${work.title}の舞台地図`,
     description: `${work.title}に登場する場所 ${work.place_count}件を地図で。${work.description}`,
   };
 }

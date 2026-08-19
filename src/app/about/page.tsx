@@ -134,7 +134,8 @@ export default function AboutPage() {
         <p className="leading-loose text-ink-2">
           <strong className="font-bold text-ink">作品からの引用</strong>は、
           場面そのものを見せないと伝わらないときのためのものです。
-          掲載箇所と出典を書いてもらい、掲載時は「引用」と分かる枠で囲って出します。
+          どの部分からの引用か（話数や巻・ページ）だけ書いてもらいます。章・話数の欄に書いてあれば、それで足ります。
+          掲載時は「引用」と分かる枠で囲って出します。
           あなた自身の説明を添えていない引用は保存できません。詳しくは{" "}
           <Link href="/rights" className="font-bold text-shu hover:underline">
             引用と権利について

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 export type WorkOption = { id: number; title: string; author: string; medium: string; place_count: number };
 
-const MEDIUM_LABEL: Record<string, string> = { novel: "小説", anime: "アニメ", manga: "漫画", film: "映画" };
+const MEDIUM_LABEL: Record<string, string> = { novel: "小説", anime: "アニメ", manga: "漫画", film: "映画／ドラマ" };
 
 const field = "w-full rounded border border-rule-2 bg-card px-3 py-2 text-sm outline-none focus:border-shu";
 
@@ -151,12 +151,12 @@ export function WorkCombobox({
           className={field}
         />
         <div className="grid grid-cols-2 gap-2">
-          <input name="new_work_author" required placeholder="作者・制作 *" className={field} />
+          <input name="new_work_author" placeholder="作者・制作（任意）" className={field} />
           <select name="new_work_medium" defaultValue="anime" className={field}>
             <option value="anime">アニメ</option>
             <option value="novel">小説</option>
             <option value="manga">漫画</option>
-            <option value="film">映画</option>
+            <option value="film">映画／ドラマ</option>
           </select>
         </div>
       </div>
@@ -204,7 +204,8 @@ export function WorkCombobox({
               >
                 <span className="min-w-0 flex-1 truncate text-sm">{o.title}</span>
                 <span className="shrink-0 text-[11px] text-ink-3">
-                  {o.author}・{MEDIUM_LABEL[o.medium] ?? o.medium}
+                  {o.author && `${o.author}・`}
+                  {MEDIUM_LABEL[o.medium] ?? o.medium}
                 </span>
               </button>
             </li>

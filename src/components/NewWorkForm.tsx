@@ -16,8 +16,8 @@ export function NewWorkForm() {
           <input name="title" required placeholder="こころ" className={`${field} mt-1`} />
         </label>
         <label className="block">
-          <span className="text-xs font-bold text-ink-2">作者・制作 *</span>
-          <input name="author" required placeholder="夏目漱石" className={`${field} mt-1`} />
+          <span className="text-xs font-bold text-ink-2">作者・制作</span>
+          <input name="author" placeholder="夏目漱石 / 監督・制作会社など" className={`${field} mt-1`} />
         </label>
       </div>
 
@@ -28,7 +28,7 @@ export function NewWorkForm() {
             <option value="novel">小説</option>
             <option value="anime">アニメ</option>
             <option value="manga">漫画</option>
-            <option value="film">映画</option>
+            <option value="film">映画／ドラマ</option>
           </select>
         </label>
         <label className="block">

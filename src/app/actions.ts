@@ -253,6 +253,7 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
     imageKind: imageKind === "work_quote" || quoteRemains ? "work_quote" : "site_photo",
     citationDetail: str(fd, "citation_detail"),
     citationSource: str(fd, "citation_source"),
+    chapter: str(fd, "chapter"),
     // 引用に添える「主」の記述。場面の説明と補足メモを合わせて見る
     commentary: `${str(fd, "note")}${str(fd, "kind") === "text" ? "" : quote}`,
   });
@@ -413,8 +414,8 @@ async function resolveWork(
 
   const title = str(fd, "new_work_title");
   if (!title) return { error: "作品を選ぶか、新しい作品名を入力してください" };
+  // 作者・制作は任意。ドラマや共同制作のように「誰の作品か」を一言で書けないものがあるため
   const author = str(fd, "new_work_author");
-  if (!author) return { error: "新しい作品を登録するには、作者・制作も入力してください" };
 
   const existing = await x.query<{ id: number; slug: string }>(
     "SELECT id, slug FROM works WHERE title = $1 AND author = $2",
@@ -446,6 +447,7 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
     imageKind: asImageKind(str(fd, "image_kind")),
     citationDetail: str(fd, "citation_detail"),
     citationSource: str(fd, "citation_source"),
+    chapter: str(fd, "chapter"),
     commentary: `${str(fd, "note")}${str(fd, "kind") === "text" ? "" : quote}`,
   });
   if (citationProblem) return { error: citationProblem };
@@ -797,7 +799,6 @@ export async function addWorkAction(_prev: FormState, fd: FormData): Promise<For
   const title = str(fd, "title");
   const author = str(fd, "author");
   if (!title) return { error: "作品名を入力してください" };
-  if (!author) return { error: "作者・制作を入力してください" };
 
   const yearRaw = str(fd, "year");
   const year = yearRaw ? Number(yearRaw) : null;

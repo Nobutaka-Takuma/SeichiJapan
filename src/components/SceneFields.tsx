@@ -31,6 +31,9 @@ export function SceneFields({
   );
   const [preview, setPreview] = useState<string | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
+  // 章・話数は引用の「どの部分か」を兼ねるので、入力の有無をその場で見る
+  const [chapter, setChapter] = useState(defaults.chapter ?? "");
+  const chapterHint = chapter.trim().length > 0;
 
   // いま引用画像が載っているか（載っていれば、差し替え・取り外しの対象になる）
   const quotedImage = Boolean(defaults.image_path) && defaults.image_kind === "work_quote";
@@ -98,10 +101,16 @@ export function SceneFields({
         <span className="text-xs font-bold text-ink-2">章・話数</span>
         <input
           name="chapter"
-          defaultValue={defaults.chapter ?? ""}
+          value={chapter}
+          onChange={(e) => setChapter(e.target.value)}
           placeholder="第3話 / 上・二 / 終盤"
           className={`${field} mt-1`}
         />
+        {quoting && (
+          <span className="mt-1 block text-[11px] text-ink-3">
+            引用のときは、ここが出所の「どの部分か」になります。
+          </span>
+        )}
       </label>
 
       <label className="block">
@@ -219,23 +228,27 @@ export function SceneFields({
       */}
       {quoting && (
         <div className="space-y-2 rounded border border-dashed border-shu/40 bg-shu-soft/30 p-3">
-          <p className="text-[11px] font-bold text-ink">
-            引用の出所（必須）
+          <p className="text-[11px] font-bold text-ink">引用の出所</p>
+          <p className="text-[11px] leading-relaxed text-ink-2">
+            作品名と作者は作品の側にあるので、あとは<b>どの部分か</b>だけ書いてください。
+            {chapterHint
+              ? "上の「章・話数」に書いてあるので、ここは空のままで構いません。"
+              : "上の「章・話数」に書いた場合も、ここは空のままで構いません。"}
           </p>
           <input
             name="citation_detail"
             defaultValue={defaults.citation_detail ?? ""}
-            placeholder="掲載箇所 *（例：第3話、上・二、第2巻 p.45）"
+            placeholder="掲載箇所（例：第3話、上・二、第2巻 p.45）"
             className={field}
           />
           <input
             name="citation_source"
             defaultValue={defaults.citation_source ?? ""}
-            placeholder="出典 *（例：新潮文庫、◯◯社、△△製作委員会）"
+            placeholder="出典（任意：新潮文庫、◯◯社、△△製作委員会）"
             className={field}
           />
-          <p className="text-[11px] leading-relaxed text-ink-2">
-            掲載時は「引用」と分かる枠で囲い、この出所を必ず添えて表示します。
+          <p className="text-[11px] leading-relaxed text-ink-3">
+            掲載時は「引用」と分かる枠で囲い、分かっている範囲の出所を添えて表示します。
           </p>
         </div>
       )}

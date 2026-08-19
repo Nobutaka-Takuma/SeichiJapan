@@ -11,7 +11,7 @@ export const MEDIUM_LABEL: Record<Medium, string> = {
   novel: "小説",
   anime: "アニメ",
   manga: "漫画",
-  film: "映画",
+  film: "映画／ドラマ",
 };
 
 export const EVIDENCE_LABEL: Record<string, string> = {

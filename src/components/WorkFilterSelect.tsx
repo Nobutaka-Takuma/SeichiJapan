@@ -40,7 +40,7 @@ export function WorkFilterSelect({
         <option value="">すべての作品</option>
         {works.map((w) => (
           <option key={w.slug} value={w.slug}>
-            {w.title}（{w.author}）
+            {w.author ? `${w.title}（${w.author}）` : w.title}
           </option>
         ))}
       </select>
