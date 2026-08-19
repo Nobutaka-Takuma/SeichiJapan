@@ -6,12 +6,14 @@ import { CommentForm } from "@/components/CommentForm";
 import { DeleteButton } from "@/components/DeleteButton";
 import { MapView, type MapPin } from "@/components/MapView";
 import { PassageLinkList } from "@/components/PassageLinkList";
+import { PhotoGallery } from "@/components/PhotoGallery";
 import { QuotedImage } from "@/components/QuotedImage";
 import { VoteButtons } from "@/components/VoteButtons";
 import { WikiText } from "@/components/WikiText";
 import { Card, ConfidenceBar, ConsensusBadge, Empty, PassageQuote } from "@/components/ui";
 import { deleteCommentAction, deleteIdentificationAction, deletePassageAction } from "@/app/actions";
-import { currentUser } from "@/lib/auth";
+import { contributorId, currentUser } from "@/lib/auth";
+import { photosForPassage } from "@/lib/photos";
 import { CONSENSUS_LABEL } from "@/lib/confidence";
 import { citationLine } from "@/lib/quote";
 import { resolveWikiLinks } from "@/lib/pilgrimage";
@@ -100,13 +102,15 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
   const placeIds = passage.candidates.map((c) => c.place_id);
   const top = passage.candidates[0];
 
-  const [comments, neighbors, sameplaces, nearby, siblings, noteLinks] = await Promise.all([
+  const [comments, neighbors, sameplaces, nearby, siblings, noteLinks, photos, viewerId] = await Promise.all([
     getComments(passageId),
     passageNeighbors(passage.id, passage.work.id),
     passagesAtSamePlaces(passage.id, placeIds),
     top ? nearbyWithFallback(top.lat, top.lng, placeIds) : Promise.resolve([]),
     moreFromWork(passage.work.id, [passage.id]),
     resolveWikiLinks(passage.note ?? ""),
+    photosForPassage(passageId),
+    contributorId(),
   ]);
 
   // 同じものを二度出さない。前後の送りと近隣に出したものは、以降から外す。
@@ -182,7 +186,8 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
             })}
           </p>
         )}
-        {passage.image_path && (
+        {/* 引用はここに1点だけ。現地写真は下の「この場面の写真」に何枚でも並ぶ */}
+        {passage.image_path && passage.image_kind === "work_quote" && (
           <QuotedImage
             className="mt-5"
             src={passage.image_path}
@@ -250,6 +255,19 @@ export default async function PassagePage({ params }: { params: Promise<{ id: st
           </div>
         </nav>
       )}
+
+      {/*
+        この場面を実際に訪ねた人の写真。作品の絵と現地の景色が並ぶと、
+        「同じ場所だ」がいちばんよく伝わる。何枚でも足せる。
+      */}
+      <PhotoGallery
+        photos={photos}
+        passageId={passage.id}
+        viewerId={viewerId}
+        isAdmin={!!user?.is_admin}
+        title="この場面の現地写真"
+        invite={top ? `${top.place_name}で撮った写真があれば、ぜひ。` : "現地で撮った写真があれば、ぜひ。"}
+      />
 
       <div className="grid gap-8 lg:grid-cols-[1.3fr_1fr] lg:items-start">
         {/* 候補ランキング */}

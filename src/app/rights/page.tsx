@@ -29,10 +29,17 @@ export default function RightsPage() {
           「いま行くとこう見える」という、作品にはない情報が加わります。
         </p>
         <p className="leading-loose text-ink-2">
+          写真は<strong className="font-bold text-ink">1か所に何枚でも</strong>載せられます。
+          誰かの写真を消さないと自分の写真を載せられない、ということはありません。
+          同じ場所でも、季節・時刻・訪れた年で見え方は変わります。積み上がるほど、その場所の姿は正確になります。
+          消せるのは<strong className="font-bold text-ink">自分が載せた写真だけ</strong>です。
+        </p>
+        <p className="leading-loose text-ink-2">
           <Link href="/guess" className="font-bold text-shu hover:underline">
             この場面はどこ？
           </Link>
-          の手がかりにも、現地の写真が使われます。写真が増えるほど遊びが面白くなります。
+          の手がかりにも、現地の写真が使われます。写真が増えるほど遊びが面白くなります
+          （同じ場所でも、そのとき載っている写真から1枚が選ばれます）。
         </p>
       </section>
 

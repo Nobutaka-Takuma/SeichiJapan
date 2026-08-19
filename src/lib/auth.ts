@@ -103,6 +103,23 @@ export async function contributor(): Promise<SessionUser> {
 }
 
 /**
+ * いま書き手として扱われる人のID。**行は作らない**。
+ *
+ * 「これは自分が載せた写真か」のような持ち主の判定に使う。
+ * `contributor()` と違い、読むだけなので、消そうとしただけで
+ * 匿名の行が増えるようなことは起きない。
+ */
+export async function contributorId(): Promise<number | null> {
+  const user = await currentUser();
+  if (user) return user.id;
+
+  const anon = await anonIdentity();
+  if (!anon) return null;
+  const row = await one<{ id: number }>("SELECT id FROM users WHERE handle = $1 AND is_anon", [anon.handle]);
+  return row?.id ?? null;
+}
+
+/**
  * 管理者だけが通る関門。
  *
  * 削除は取り消せないので、権限はここ一箇所でだけ判定する。

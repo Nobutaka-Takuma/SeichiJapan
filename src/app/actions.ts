@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { one, query, tx, type Executor } from "@/lib/db";
 import { ensureDatabaseReady } from "@/lib/data";
-import { contributor, currentUser, login, logout, register, requireAdmin } from "@/lib/auth";
+import { contributor, contributorId, currentUser, login, logout, register, requireAdmin } from "@/lib/auth";
+import { addPhoto, getPhoto, refreshPassageCover, refreshPlaceCover } from "@/lib/photos";
 import { UploadError, deleteImage, saveImage } from "@/lib/uploads";
 import { asImageKind, checkQuotation } from "@/lib/quote";
 import {
@@ -121,10 +122,7 @@ const snapshotPassage = (x: Executor, passageId: number, editorId: number | null
 
 export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const placeId = Number(fd.get("place_id"));
-  const current = await one<{ id: number; photo_path: string }>(
-    "SELECT id, photo_path FROM places WHERE id = $1",
-    [placeId],
-  );
+  const current = await one<{ id: number }>("SELECT id FROM places WHERE id = $1", [placeId]);
   if (!current) return { error: "場所が見つかりません" };
 
   const name = str(fd, "name");
@@ -141,18 +139,14 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
     // ここで初めて匿名の行ができる（空振りで行だけ増えるのを避ける）
     const user = await contributor();
 
-    let photo = current.photo_path;
-    if (str(fd, "remove_photo") === "1") photo = "";
-    const uploaded = await saveImage(fd.get("photo"));
-    if (uploaded) photo = uploaded;
-
+    // 写真はここでは触らない。項目のページから何枚でも足せる（photos 表）。
     await tx(async (x) => {
       await x.query(
         `UPDATE places
             SET name = $1, lat = $2, lng = $3, prefecture = $4, address = $5,
-                note = $6, body = $7, access = $8, photo_path = $9,
-                updated_at = now(), updated_by = $10
-          WHERE id = $11`,
+                note = $6, body = $7, access = $8,
+                updated_at = now(), updated_by = $9
+          WHERE id = $10`,
         [
           name,
           lat,
@@ -162,7 +156,6 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
           str(fd, "note"),
           str(fd, "body"),
           str(fd, "access"),
-          photo,
           user.id,
           placeId,
         ],
@@ -170,7 +163,6 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
       await snapshotPlace(x, placeId, user.id, str(fd, "summary"));
     });
   } catch (e) {
-    if (e instanceof UploadError) return { error: e.message };
     return fail(e);
   }
 
@@ -180,7 +172,13 @@ export async function editPlaceAction(_prev: FormState, fd: FormData): Promise<F
   redirect(`/places/${placeId}`);
 }
 
-/** 過去の版の内容で上書きする。差し戻したこと自体も履歴に残る。 */
+/**
+ * 過去の版の内容で上書きする。差し戻したこと自体も履歴に残る。
+ *
+ * 写真は差し戻しの対象にしない。写真は誰かが載せたもので、
+ * 消せるのは載せた本人（と管理者）だけ。文章を戻したついでに
+ * 他人の写真が消えたり戻ったりしては筋が通らない。
+ */
 export async function revertPlaceAction(revisionId: number): Promise<FormState> {
   const rev = await one<{
     id: number;
@@ -193,7 +191,6 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
     note: string;
     body: string;
     access: string;
-    photo_path: string;
   }>("SELECT * FROM place_revisions WHERE id = $1", [revisionId]);
   if (!rev) return { error: "指定された版が見つかりません" };
 
@@ -203,9 +200,9 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
       await x.query(
         `UPDATE places
             SET name = $1, lat = $2, lng = $3, prefecture = $4, address = $5,
-                note = $6, body = $7, access = $8, photo_path = $9,
-                updated_at = now(), updated_by = $10
-          WHERE id = $11`,
+                note = $6, body = $7, access = $8,
+                updated_at = now(), updated_by = $9
+          WHERE id = $10`,
         [
           rev.name,
           rev.lat,
@@ -215,7 +212,6 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
           rev.note,
           rev.body,
           rev.access,
-          rev.photo_path,
           user.id,
           rev.place_id,
         ],
@@ -235,19 +231,26 @@ export async function revertPlaceAction(revisionId: number): Promise<FormState> 
 
 export async function editPassageAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const passageId = Number(fd.get("passage_id"));
-  const current = await one<{ id: number; image_path: string }>(
-    "SELECT id, image_path FROM passages WHERE id = $1",
-    [passageId],
-  );
+  const current = await one<{ id: number }>("SELECT id FROM passages WHERE id = $1", [passageId]);
   if (!current) return { error: "シーンが見つかりません" };
 
   const quote = str(fd, "quote");
   if (quote.length < 5) return { error: "本文または場面の記述を5文字以上で書いてください" };
 
   const imageKind = asImageKind(str(fd, "image_kind"));
+  const removeQuote = str(fd, "remove_image") === "1";
+
+  /*
+   * すでに引用画像が載っているなら、種別の選び直しにかかわらず出所が要る。
+   * 「現地の写真」に切り替えただけで出所が消せてしまうと、
+   * 出所のない引用が画面に残ってしまうため。
+   */
+  const hadQuote = await one("SELECT 1 FROM photos WHERE passage_id = $1 AND kind = 'work_quote'", [passageId]);
+  const quoteRemains = Boolean(hadQuote) && !removeQuote;
+
   const problem = checkQuotation({
     kind: str(fd, "kind") || "scene",
-    imageKind,
+    imageKind: imageKind === "work_quote" || quoteRemains ? "work_quote" : "site_photo",
     citationDetail: str(fd, "citation_detail"),
     citationSource: str(fd, "citation_source"),
     // 引用に添える「主」の記述。場面の説明と補足メモを合わせて見る
@@ -257,37 +260,78 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
 
   try {
     const user = await contributor();
-
-    let image = current.image_path;
-    if (str(fd, "remove_image") === "1") image = "";
     const uploaded = await saveImage(fd.get("image"));
-    if (uploaded) image = uploaded;
+    const stale: string[] = [];
 
     await tx(async (x) => {
+      /*
+       * 引用は1場面に1点まで（必要な範囲にとどめるため）。
+       * だから引用だけは「差し替え」で、古いほうは消す。
+       * 現地写真は逆に、足すだけ。誰かの写真を押しのけることはしない。
+       */
+      if (removeQuote || (uploaded && imageKind === "work_quote")) {
+        const old = await x.query<{ path: string }>(
+          "SELECT path FROM photos WHERE passage_id = $1 AND kind = 'work_quote'",
+          [passageId],
+        );
+        await x.query("DELETE FROM photos WHERE passage_id = $1 AND kind = 'work_quote'", [passageId]);
+        stale.push(...old.map((o) => o.path));
+      } else if (quoteRemains) {
+        /*
+         * 差し替えないときは、いま出ている引用の出所だけ書き換える。
+         * 説明の欄は、種別が「引用」のときだけこの引用のものとして扱う
+         * （「現地の写真」を選んでいるなら、その欄は今から足す写真のもの）。
+         */
+        await x.query(
+          `UPDATE photos
+              SET citation_detail = $1, citation_source = $2,
+                  caption = COALESCE($3, caption), credit = COALESCE($4, credit)
+            WHERE passage_id = $5 AND kind = 'work_quote'`,
+          [
+            str(fd, "citation_detail"),
+            str(fd, "citation_source"),
+            imageKind === "work_quote" ? str(fd, "image_caption").slice(0, 200) : null,
+            imageKind === "work_quote" ? str(fd, "image_credit").slice(0, 80) : null,
+            passageId,
+          ],
+        );
+      }
+
+      if (uploaded) {
+        await addPhoto(x, { passageId }, {
+          path: uploaded,
+          caption: str(fd, "image_caption"),
+          credit: str(fd, "image_credit"),
+          kind: imageKind,
+          citationDetail: str(fd, "citation_detail"),
+          citationSource: str(fd, "citation_source"),
+          userId: user.id,
+        });
+      }
+
       await x.query(
         `UPDATE passages
             SET chapter = $1, kind = $2, quote = $3, note = $4,
-                image_path = $5, image_caption = $6, image_credit = $7,
-                image_kind = $8, citation_detail = $9, citation_source = $10,
-                updated_at = now(), updated_by = $11
-          WHERE id = $12`,
+                citation_detail = $5, citation_source = $6,
+                updated_at = now(), updated_by = $7
+          WHERE id = $8`,
         [
           str(fd, "chapter"),
           str(fd, "kind") || "scene",
           quote,
           str(fd, "note"),
-          image,
-          str(fd, "image_caption"),
-          str(fd, "image_credit"),
-          imageKind,
           str(fd, "citation_detail"),
           str(fd, "citation_source"),
           user.id,
           passageId,
         ],
       );
+      // 代表の1枚（一覧・地図の吹き出しが見ている控え）を引き直す
+      await refreshPassageCover(x, passageId);
       await snapshotPassage(x, passageId, user.id, str(fd, "summary"));
     });
+
+    for (const path of stale) await deleteImage(path);
   } catch (e) {
     if (e instanceof UploadError) return { error: e.message };
     return fail(e);
@@ -298,6 +342,7 @@ export async function editPassageAction(_prev: FormState, fd: FormData): Promise
   redirect(`/passages/${passageId}`);
 }
 
+/** 差し戻しは文章だけ。写真は載せた本人のものなので触らない（場所と同じ扱い）。 */
 export async function revertPassageAction(revisionId: number): Promise<FormState> {
   const rev = await one<{
     id: number;
@@ -306,9 +351,6 @@ export async function revertPassageAction(revisionId: number): Promise<FormState
     kind: string;
     quote: string;
     note: string;
-    image_path: string;
-    image_caption: string;
-    image_credit: string;
   }>("SELECT * FROM passage_revisions WHERE id = $1", [revisionId]);
   if (!rev) return { error: "指定された版が見つかりません" };
 
@@ -318,20 +360,9 @@ export async function revertPassageAction(revisionId: number): Promise<FormState
       await x.query(
         `UPDATE passages
             SET chapter = $1, kind = $2, quote = $3, note = $4,
-                image_path = $5, image_caption = $6, image_credit = $7,
-                updated_at = now(), updated_by = $8
-          WHERE id = $9`,
-        [
-          rev.chapter,
-          rev.kind,
-          rev.quote,
-          rev.note,
-          rev.image_path,
-          rev.image_caption,
-          rev.image_credit,
-          user.id,
-          rev.passage_id,
-        ],
+                updated_at = now(), updated_by = $5
+          WHERE id = $6`,
+        [rev.chapter, rev.kind, rev.quote, rev.note, user.id, rev.passage_id],
       );
       await snapshotPassage(x, rev.passage_id, user.id, `#${rev.id} の版へ差し戻し`);
     });
@@ -474,8 +505,8 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
       const passage = await x.query<{ id: number }>(
         `INSERT INTO passages
            (work_id, chapter, kind, quote, note, sort_order, created_by,
-            image_path, image_caption, image_credit, image_kind, citation_detail, citation_source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+            citation_detail, citation_source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
         [
           resolved.id,
           str(fd, "chapter"),
@@ -484,15 +515,25 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
           str(fd, "note"),
           order,
           user.id,
-          image ?? "",
-          str(fd, "image_caption"),
-          str(fd, "image_credit"),
-          asImageKind(str(fd, "image_kind")),
           str(fd, "citation_detail"),
           str(fd, "citation_source"),
         ],
       );
       const passageId = passage[0].id;
+
+      // 画像は photos に入れて、代表の1枚を引き直す。あとから何枚でも足せる。
+      if (image) {
+        await addPhoto(x, { passageId }, {
+          path: image,
+          caption: str(fd, "image_caption"),
+          credit: str(fd, "image_credit"),
+          kind: asImageKind(str(fd, "image_kind")),
+          citationDetail: str(fd, "citation_detail"),
+          citationSource: str(fd, "citation_source"),
+          userId: user.id,
+        });
+        await refreshPassageCover(x, passageId);
+      }
       await snapshotPassage(x, passageId, user.id, "新規作成");
 
       const ident = await x.query<{ id: number }>(
@@ -515,6 +556,111 @@ export async function addSceneAction(_prev: FormState, fd: FormData): Promise<Fo
   revalidatePath("/map");
   revalidatePath("/");
   return { ok: "登録しました", placeId };
+}
+
+/* ---------- 写真（何枚でも足せる） ---------- */
+
+/**
+ * 写真を1枚足す。**誰かの写真を消す必要はない。**
+ *
+ * 撮ってきた写真を載せるのに、先に他人の写真を消さなければならないのでは
+ * 手が止まる。足すだけで済むようにしてある。
+ * ここから入るのは現地写真だけ（引用はシーンの編集から、1点まで）。
+ */
+export async function addPhotoAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const placeId = Number(fd.get("place_id")) || 0;
+  const passageId = Number(fd.get("passage_id")) || 0;
+  if (!placeId && !passageId) return { error: "どこの写真か分かりませんでした" };
+
+  const target = placeId ? { placeId } : { passageId };
+  const exists = placeId
+    ? await one("SELECT 1 FROM places WHERE id = $1", [placeId])
+    : await one("SELECT 1 FROM passages WHERE id = $1", [passageId]);
+  if (!exists) return { error: "写真を足す先が見つかりません" };
+
+  const takenOn = str(fd, "taken_on");
+  if (takenOn && !/^\d{4}-\d{2}-\d{2}$/.test(takenOn)) return { error: "撮影日は年月日で入力してください" };
+
+  let saved: string | null = null;
+  try {
+    saved = await saveImage(fd.get("photo"));
+  } catch (e) {
+    if (e instanceof UploadError) return { error: e.message };
+    return fail(e);
+  }
+  if (!saved) return { error: "写真を選んでください" };
+  const path = saved;
+
+  try {
+    // 書き手が決まるのは、入力が通ってから
+    const user = await contributor();
+    await tx(async (x) => {
+      await addPhoto(x, target, {
+        path,
+        caption: str(fd, "caption"),
+        takenOn: takenOn || null,
+        userId: user.id,
+      });
+      if (placeId) await refreshPlaceCover(x, placeId);
+      else await refreshPassageCover(x, passageId);
+    });
+  } catch (e) {
+    // 行が入らなかったのに実体だけ残ると、誰にも辿れないごみになる
+    await deleteImage(path);
+    return fail(e);
+  }
+
+  if (placeId) {
+    revalidatePath(`/places/${placeId}`);
+    revalidatePath("/places");
+    revalidatePath("/");
+  } else {
+    revalidatePath(`/passages/${passageId}`);
+  }
+  revalidatePath("/map");
+  return { ok: "写真を載せました" };
+}
+
+/**
+ * 写真を1枚外す。
+ *
+ * 消せるのは**自分が載せた写真**だけ。他人の写真を消せるのは管理者に限り、
+ * その場合は理由を書いてもらい、記録に残す（削除と同じ扱い）。
+ */
+export async function removePhotoAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  try {
+    const photo = await getPhoto(Number(fd.get("id")));
+    if (!photo) return { error: "その写真はすでにありません" };
+
+    const user = await currentUser();
+    const me = await contributorId();
+    const mine = me !== null && photo.created_by === me;
+    if (!mine && !user?.is_admin) {
+      return { error: "自分が載せた写真だけ外せます。問題のある写真は管理者に知らせてください" };
+    }
+
+    await tx(async (x) => {
+      // 他人の写真を消すとき（管理者）は、理由とともに控えを残す
+      if (!mine) {
+        await record(x, user!.id, "photo", photo.id, photo.caption || photo.path, deleteReason(fd), photo);
+      }
+      await x.query("DELETE FROM photos WHERE id = $1", [photo.id]);
+      if (photo.place_id) await refreshPlaceCover(x, photo.place_id);
+      if (photo.passage_id) await refreshPassageCover(x, photo.passage_id);
+    });
+    await deleteImage(photo.path);
+
+    if (photo.place_id) {
+      revalidatePath(`/places/${photo.place_id}`);
+      revalidatePath("/places");
+      revalidatePath("/");
+    }
+    if (photo.passage_id) revalidatePath(`/passages/${photo.passage_id}`);
+    revalidatePath("/map");
+  } catch (e) {
+    return fail(e);
+  }
+  return { ok: "外しました" };
 }
 
 /* ---------- 投票 ---------- */
@@ -831,11 +977,12 @@ export async function deletePlaceAction(_prev: FormState, fd: FormData): Promise
       // 一緒に消えるものも控えておく（この場所に結びついた説・版・いいね・訪問）
       const idents = await x.query("SELECT * FROM identifications WHERE place_id = $1", [id]);
       const revisions = await x.query("SELECT * FROM place_revisions WHERE place_id = $1", [id]);
+      const photos = await x.query<{ path: string }>("SELECT * FROM photos WHERE place_id = $1", [id]);
 
-      await record(x, admin.id, "place", id, place.name, reason, { place, idents, revisions });
-      // 外部キーの ON DELETE CASCADE が、説・版・いいね・訪問・コースの停留点を連れていく
+      await record(x, admin.id, "place", id, place.name, reason, { place, idents, revisions, photos });
+      // 外部キーの ON DELETE CASCADE が、説・版・写真・いいね・訪問・コースの停留点を連れていく
       await x.query("DELETE FROM places WHERE id = $1", [id]);
-      return [place.photo_path].filter(Boolean) as string[];
+      return [place.photo_path, ...photos.map((p) => p.path)].filter(Boolean) as string[];
     });
 
     for (const path of images) await deleteImage(path);
@@ -873,11 +1020,12 @@ export async function deletePassageAction(_prev: FormState, fd: FormData): Promi
       const idents = await x.query("SELECT * FROM identifications WHERE passage_id = $1", [id]);
       const comments = await x.query("SELECT * FROM comments WHERE passage_id = $1", [id]);
       const revisions = await x.query("SELECT * FROM passage_revisions WHERE passage_id = $1", [id]);
+      const photos = await x.query<{ path: string }>("SELECT * FROM photos WHERE passage_id = $1", [id]);
 
       const label = `『${work[0]?.title ?? "?"}』${passage.quote.slice(0, 40)}`;
-      await record(x, admin.id, "passage", id, label, reason, { passage, idents, comments, revisions });
+      await record(x, admin.id, "passage", id, label, reason, { passage, idents, comments, revisions, photos });
       await x.query("DELETE FROM passages WHERE id = $1", [id]);
-      return [passage.image_path].filter(Boolean) as string[];
+      return [passage.image_path, ...photos.map((p) => p.path)].filter(Boolean) as string[];
     });
 
     for (const path of images) await deleteImage(path);
@@ -994,9 +1142,13 @@ export async function deleteWorkAction(_prev: FormState, fd: FormData): Promise<
       if (typed !== work.title) throw new Error("確認のため、作品名をそのとおりに入力してください");
 
       const passages = await x.query<{ image_path: string }>("SELECT * FROM passages WHERE work_id = $1", [id]);
-      await record(x, admin.id, "work", id, work.title, reason, { work, passages });
+      const photos = await x.query<{ path: string }>(
+        "SELECT * FROM photos WHERE passage_id IN (SELECT id FROM passages WHERE work_id = $1)",
+        [id],
+      );
+      await record(x, admin.id, "work", id, work.title, reason, { work, passages, photos });
       await x.query("DELETE FROM works WHERE id = $1", [id]);
-      return passages.map((p) => p.image_path).filter(Boolean);
+      return [...passages.map((p) => p.image_path), ...photos.map((p) => p.path)].filter(Boolean);
     });
 
     for (const path of images) await deleteImage(path);

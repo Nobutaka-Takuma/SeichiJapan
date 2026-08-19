@@ -127,6 +127,11 @@ export default function AboutPage() {
           「いま行くとこう見える」という、作品にはない情報が加わります。
         </p>
         <p className="leading-loose text-ink-2">
+          現地の写真は<strong className="font-bold text-ink">1か所に何枚でも</strong>載せられます。
+          誰かの写真を消してから載せる、ということはしなくて構いません。
+          自分が載せた写真は、自分でいつでも外せます。
+        </p>
+        <p className="leading-loose text-ink-2">
           <strong className="font-bold text-ink">作品からの引用</strong>は、
           場面そのものを見せないと伝わらないときのためのものです。
           掲載箇所と出典を書いてもらい、掲載時は「引用」と分かる枠で囲って出します。

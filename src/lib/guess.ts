@@ -94,6 +94,8 @@ type Row = {
   work_title: string;
   work_author: string;
   medium: string;
+  /** その場所・その場面に載っている現地写真から、1枚を選んだもの。 */
+  photo: string | null;
 };
 
 /**
@@ -122,11 +124,19 @@ async function candidates(limit: number): Promise<Row[]> {
             COALESCE(p.image_kind, 'site_photo') AS image_kind,
             COALESCE(p.citation_detail, '') AS citation_detail,
             COALESCE(p.citation_source, '') AS citation_source,
-            w.slug AS work_slug, w.title AS work_title, w.author AS work_author, w.medium
+            w.slug AS work_slug, w.title AS work_title, w.author AS work_author, w.medium,
+            pic.path AS photo
        FROM identifications i
        JOIN places pl ON pl.id = i.place_id
        JOIN passages p ON p.id = i.passage_id
        JOIN works w ON w.id = p.work_id
+       -- 現地写真は何枚でもあるので、そのつど1枚を選ぶ。
+       -- 同じ場所が出ても違う写真になり、写真が増えるほど問題も新しくなる。
+       LEFT JOIN LATERAL (
+         SELECT ph.path FROM photos ph
+          WHERE ph.kind = 'site_photo' AND (ph.place_id = pl.id OR ph.passage_id = p.id)
+          ORDER BY random() LIMIT 1
+       ) pic ON true
       WHERE length(p.quote) >= 12
       ORDER BY random()
       LIMIT $1`,
@@ -142,9 +152,9 @@ function toClue(row: Row, index: number): Clue {
     chapter: row.chapter,
   };
 
-  // 現地写真があればそれを使う。場所の写真、次にシーンに付いた現地写真。
+  // 現地写真があればそれを使う。載っている写真から選んだ1枚、無ければ代表の1枚。
   const photo =
-    row.photo_path || (row.image_kind !== "work_quote" ? row.image_path : "") || "";
+    row.photo || row.photo_path || (row.image_kind !== "work_quote" ? row.image_path : "") || "";
   if (photo) return { ...base, kind: "photo", image: photo };
 
   if (row.kind === "text") {

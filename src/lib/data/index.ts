@@ -1,4 +1,5 @@
 import { driver, tx, type Executor } from "../db";
+import { backfillPhotos } from "../photos";
 import { createSchema } from "../schema";
 import { applyDataPacks } from "./apply";
 import { initialPack } from "./packs/initial";
@@ -27,7 +28,7 @@ const LATEST = PACKS[PACKS.length - 1].id;
  * これが `data_packs` に無ければ、既存のDBにもスキーマを流し直す。
  * ALTER はすべて IF NOT EXISTS なので、流し直しても壊れない。
  */
-const SCHEMA_ID = "schema-0004-citation";
+const SCHEMA_ID = "schema-0005-photos";
 
 /** 同時に複数のインスタンスが初期化しても衝突しないための鍵。 */
 const LOCK_KEY = 823_641_907;
@@ -35,6 +36,8 @@ const LOCK_KEY = 823_641_907;
 export async function setupDatabase(x: Executor) {
   await createSchema(x);
   await applyDataPacks(x, PACKS);
+  // 1枚しか持てなかった頃の写真を、何枚でも持てる表へ引き継ぐ
+  await backfillPhotos(x);
   await x.query("INSERT INTO data_packs (id) VALUES ($1) ON CONFLICT DO NOTHING", [SCHEMA_ID]);
 }
 

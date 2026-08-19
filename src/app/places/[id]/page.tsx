@@ -3,13 +3,15 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { LikeButton } from "@/components/LikeButton";
 import { MapView } from "@/components/MapView";
+import { PhotoGallery } from "@/components/PhotoGallery";
 import { QuotedImage } from "@/components/QuotedImage";
 import { DeleteButton } from "@/components/DeleteButton";
 import { VisitButton } from "@/components/VisitButton";
 import { WikiText } from "@/components/WikiText";
 import { Card, MediumBadge, PassageQuote } from "@/components/ui";
 import { deletePlaceAction } from "@/app/actions";
-import { currentUser } from "@/lib/auth";
+import { contributorId, currentUser } from "@/lib/auth";
+import { photosForPlace } from "@/lib/photos";
 import {
   backlinks,
   getVisitState,
@@ -74,13 +76,15 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
   const place = await getPlace(placeId, user?.id);
   if (!place) notFound();
 
-  const [appearances, visit, related, links, incoming, routes] = await Promise.all([
+  const [appearances, visit, related, links, incoming, routes, photos, viewerId] = await Promise.all([
     getAppearances(placeId),
     getVisitState(placeId, user?.id),
     relatedPlaces(placeId),
     resolveWikiLinks(place.body),
     backlinks(place.name, placeId),
     routesForPlace(placeId),
+    photosForPlace(placeId),
+    contributorId(),
   ]);
   const works = new Set(appearances.map((a) => a.work_slug));
 
@@ -175,18 +179,17 @@ export default async function PlacePage({ params }: { params: Promise<{ id: stri
 
       <div className="grid gap-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
         <div className="space-y-8">
-          {place.photo_path && (
-            <figure>
-              {/* 利用者が投稿した画像。サイズが不定なので next/image は使わない */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={place.photo_path}
-                alt={place.name}
-                className="w-full rounded-lg border border-rule object-cover"
-                style={{ maxHeight: 380 }}
-              />
-            </figure>
-          )}
+          {/*
+            写真は何枚でも並ぶ。季節や時刻で見え方が変わる場所ほど、
+            積み上がっていくほうが伝わる。
+          */}
+          <PhotoGallery
+            photos={photos}
+            placeId={place.id}
+            viewerId={viewerId}
+            isAdmin={!!user?.is_admin}
+            invite={`${place.name}を訪れたときの1枚を載せてみませんか。`}
+          />
 
           <section>
             <h2 className="mb-3 border-b border-rule pb-2 font-serif text-lg font-bold tracking-wide">解説</h2>

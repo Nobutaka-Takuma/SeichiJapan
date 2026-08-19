@@ -12,16 +12,13 @@ const field = "w-full rounded border border-rule-2 bg-card px-3 py-2.5 text-sm o
 export function PlaceEditForm({ place }: { place: Place }) {
   const [state, action, pending] = useActionState<FormState, FormData>(editPlaceAction, {});
   const [coords, setCoords] = useState({ lat: place.lat, lng: place.lng });
-  const [removePhoto, setRemovePhoto] = useState(false);
   const [focus, setFocus] = useState<MapFocus | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
 
   return (
     <form action={action} className="space-y-6">
       <input type="hidden" name="place_id" value={place.id} />
       <input type="hidden" name="lat" value={coords.lat} />
       <input type="hidden" name="lng" value={coords.lng} />
-      <input type="hidden" name="remove_photo" value={removePhoto ? "1" : "0"} />
 
       <section className="space-y-3">
         <h2 className="border-b border-rule pb-1.5 font-serif text-base font-bold">基本情報</h2>
@@ -91,43 +88,18 @@ export function PlaceEditForm({ place }: { place: Place }) {
         />
       </section>
 
+      {/*
+        写真はこの画面では扱わない。項目のページから何枚でも足せるようにしてある。
+        ここに1枚ぶんの欄を置くと、誰かの写真を差し替える操作になってしまう。
+      */}
       <section className="space-y-2">
         <h2 className="border-b border-rule pb-1.5 font-serif text-base font-bold">現地の写真</h2>
-        {place.photo_path && !removePhoto && (
-          <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={place.photo_path} alt="" className="h-20 w-32 rounded object-cover" />
-            <button
-              type="button"
-              onClick={() => setRemovePhoto(true)}
-              className="text-xs text-ink-3 hover:text-shu"
-            >
-              この写真を外す
-            </button>
-          </div>
-        )}
-        {removePhoto && (
-          <p className="text-xs text-ink-3">
-            写真を外します。
-            <button type="button" onClick={() => setRemovePhoto(false)} className="ml-2 font-bold text-shu">
-              取り消す
-            </button>
-          </p>
-        )}
-        <input
-          type="file"
-          name="photo"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            setPreview(f ? URL.createObjectURL(f) : null);
-          }}
-          className="block w-full text-xs text-ink-2 file:mr-3 file:rounded file:border-0 file:bg-paper-2 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink-2"
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {preview && <img src={preview} alt="" className="h-32 w-full rounded object-cover" />}
-        <p className="text-[11px] leading-relaxed text-ink-3">
-          自分で撮影した写真を使ってください。作品の映像・挿絵の転載は避けてください。
+        <p className="text-xs leading-relaxed text-ink-3">
+          写真は{" "}
+          <Link href={`/places/${place.id}#photos`} className="font-bold text-shu hover:underline">
+            項目のページ
+          </Link>{" "}
+          から何枚でも足せます。すでにある写真を消す必要はありません。
         </p>
       </section>
 

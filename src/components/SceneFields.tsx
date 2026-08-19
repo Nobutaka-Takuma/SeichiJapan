@@ -32,8 +32,16 @@ export function SceneFields({
   const [preview, setPreview] = useState<string | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
 
-  // 本文引用か、作品からの画像引用。どちらでも出所の明示が要る。
-  const quoting = kind === "text" || imageKind === "work_quote";
+  // いま引用画像が載っているか（載っていれば、差し替え・取り外しの対象になる）
+  const quotedImage = Boolean(defaults.image_path) && defaults.image_kind === "work_quote";
+
+  /*
+   * 本文引用か、作品からの画像引用。どちらでも出所の明示が要る。
+   * すでに引用が載っているあいだも出所の欄を出しておく。
+   * 種別を「現地の写真」に切り替えただけで欄が消えると、
+   * 出所のない引用が画面に残ってしまうため。
+   */
+  const quoting = kind === "text" || imageKind === "work_quote" || (quotedImage && !removeImage);
 
   return (
     <>
@@ -110,25 +118,29 @@ export function SceneFields({
       <div className="space-y-2">
         <span className="text-xs font-bold text-ink-2">シーンの画像</span>
 
-        {defaults.image_path && !removeImage && (
+        {/*
+          差し替えになるのは引用だけ（1シーンに1点までなので）。
+          現地写真は足すだけで、すでに載っている写真は消えない。
+        */}
+        {quotedImage && !removeImage && (
           <div className="flex items-center gap-3">
             {/* 利用者が投稿した画像。サイズが不定なので next/image は使わない */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={defaults.image_path} alt="" className="h-20 w-32 rounded object-cover" />
             <button type="button" onClick={() => setRemoveImage(true)} className="text-xs text-ink-3 hover:text-shu">
-              この画像を外す
+              この引用を外す
             </button>
           </div>
         )}
-        {removeImage && (
+        {quotedImage && removeImage && (
           <p className="text-xs text-ink-3">
-            画像を外します。
+            引用を外します。
             <button type="button" onClick={() => setRemoveImage(false)} className="ml-2 font-bold text-shu">
               取り消す
             </button>
           </p>
         )}
-        <input type="hidden" name="remove_image" value={removeImage ? "1" : "0"} />
+        <input type="hidden" name="remove_image" value={quotedImage && removeImage ? "1" : "0"} />
 
         <input
           type="file"
@@ -187,6 +199,8 @@ export function SceneFields({
             />
             <p className="text-[11px] leading-relaxed text-ink-3">
               自分で撮影した写真を使ってください。他人の写真を無断で載せないでください。
+              <br />
+              写真は<b className="text-ink-2">何枚でも足せます</b>。ここで足しても、すでに載っている写真は消えません。
             </p>
           </>
         ) : (
