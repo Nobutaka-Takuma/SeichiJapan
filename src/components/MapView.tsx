@@ -130,11 +130,19 @@ export function MapView({
     };
   }, []);
 
+  /*
+   * 中心は配列で受け取るが、依存には数値のまま入れる。
+   * 配列のままだと、親が再描画するたびに別物と見なされて
+   * 地図を作り直してしまう（作り直しのあいだ、地図は消える）。
+   */
+  const centerLat = center?.[0];
+  const centerLng = center?.[1];
+
   useEffect(() => {
     const L = leaflet;
     if (!L || !ref.current || mapRef.current) return;
     const map = L.map(ref.current, {
-      center: center ?? JAPAN_CENTER,
+      center: centerLat != null && centerLng != null ? [centerLat, centerLng] : JAPAN_CENTER,
       zoom,
       scrollWheelZoom: false,
       zoomControl: true,
@@ -157,7 +165,7 @@ export function MapView({
       map.remove();
       mapRef.current = null;
     };
-  }, [leaflet, center, zoom]);
+  }, [leaflet, centerLat, centerLng, zoom]);
 
   useEffect(() => {
     const L = leaflet;
@@ -245,9 +253,18 @@ export function MapView({
     }
   }, [leaflet, picked]);
 
+  /*
+   * 地図の入れ物には、Leaflet が自前の class を直に足す（leaflet-container など）。
+   * その同じ要素の className を React にも持たせると、書き込みモードの
+   * 切り替えのように class が変わったとき、React が class 属性をまるごと
+   * 書き直して **Leaflet の class を消してしまう**。位置指定も切り抜きも
+   * その class に載っているので、地図は真っ白になる。
+   *
+   * そこで、見た目の切り替えは外側の div が持ち、
+   * 地図の入れ物は React が class を一度も書かない div にしてある。
+   */
   return (
     <div
-      ref={ref}
       className={`${className} ${picking ? "seichi-map--picking" : ""}`}
       style={{
         height: typeof height === "number" ? `${height}px` : height,
@@ -256,7 +273,9 @@ export function MapView({
       }}
       role="application"
       aria-label="作品に登場する場所の地図"
-    />
+    >
+      <div ref={ref} style={{ height: "100%", width: "100%" }} />
+    </div>
   );
 }
 
